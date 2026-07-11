@@ -184,6 +184,17 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
         <button class="btn dl alt" id="dl16">PNG · 16-bit</button>
       </div>
       <div class="hint">8-bit works everywhere (Photoshop brushes, Blender sculpt alphas). 16-bit gives smoother height for Unreal landscape sculpting and Blender displacement — no stair-stepping. Turn on <em>Tileable</em> to make textures that repeat seamlessly.</div>
+      <h2 style="margin-top:16px">Brush pack</h2>
+      <select id="packCount">
+        <option value="4">4 brushes</option>
+        <option value="8" selected>8 brushes</option>
+        <option value="12">12 brushes</option>
+      </select>
+      <div class="exportBtns">
+        <button class="btn dl" id="pack8">ZIP · 8-bit</button>
+        <button class="btn dl alt" id="pack16">ZIP · 16-bit</button>
+      </div>
+      <div class="hint">Bundles seed variations of the current preset + settings into one ZIP (uses the size above, starts from your seed). Heads-up: 16-bit at 4096 makes very large files.</div>
     </div>
 
     <div class="panel supportCard">
@@ -933,6 +944,90 @@ async function doExport(bits){
 }
 $('dl8').onclick=()=>doExport(8);
 $('dl16').onclick=()=>doExport(16);
+
+// ----- brush pack: N seed variations zipped (stored entries; PNGs are already compressed) -----
+function makeZip(files){
+  const now=new Date();
+  const dosTime=(now.getHours()<<11)|(now.getMinutes()<<5)|(now.getSeconds()>>1);
+  const dosDate=(((now.getFullYear()-1980)&0x7f)<<9)|((now.getMonth()+1)<<5)|now.getDate();
+  const enc=new TextEncoder();
+  const parts=[],central=[];
+  let offset=0;
+  for(const f of files){
+    const name=enc.encode(f.name);
+    const crc=crc32(f.data,0,f.data.length);
+    const lh=new Uint8Array(30+name.length);
+    const dv=new DataView(lh.buffer);
+    dv.setUint32(0,0x04034b50,true);
+    dv.setUint16(4,20,true);
+    dv.setUint16(10,dosTime,true);dv.setUint16(12,dosDate,true);
+    dv.setUint32(14,crc,true);
+    dv.setUint32(18,f.data.length,true);dv.setUint32(22,f.data.length,true);
+    dv.setUint16(26,name.length,true);
+    lh.set(name,30);
+    parts.push(lh,f.data);
+    const ch=new Uint8Array(46+name.length);
+    const cv=new DataView(ch.buffer);
+    cv.setUint32(0,0x02014b50,true);
+    cv.setUint16(4,20,true);cv.setUint16(6,20,true);
+    cv.setUint16(12,dosTime,true);cv.setUint16(14,dosDate,true);
+    cv.setUint32(16,crc,true);
+    cv.setUint32(20,f.data.length,true);cv.setUint32(24,f.data.length,true);
+    cv.setUint16(28,name.length,true);
+    cv.setUint32(42,offset,true);
+    ch.set(name,46);
+    central.push(ch);
+    offset+=lh.length+f.data.length;
+  }
+  let cdSize=0;for(const c of central)cdSize+=c.length;
+  const eocd=new Uint8Array(22);
+  const ev=new DataView(eocd.buffer);
+  ev.setUint32(0,0x06054b50,true);
+  ev.setUint16(8,files.length,true);ev.setUint16(10,files.length,true);
+  ev.setUint32(12,cdSize,true);ev.setUint32(16,offset,true);
+  return new Blob([...parts,...central,eocd],{type:'application/zip'});
+}
+function packSeed(base,i){return i===0?base:1+((base+i*104729)%999998);}
+async function doPack(bits){
+  const size=+$('size').value,count=+$('packCount').value;
+  busy.classList.add('show');
+  try{
+    const files=[],seeds=[];
+    for(let i=0;i<count;i++){
+      const sd=packSeed(state.seed,i);
+      seeds.push(sd);
+      busy.textContent=`Forging ${i+1} / ${count}…`;
+      const P=Object.assign(params(),{seed:sd});
+      const r=await render(state.preset,P,size);
+      const f=new Float32Array(r.data);
+      const blob=bits===16?await encodePNG16(f,size,size):await encodePNG8(f,size,size);
+      files.push({name:`alphasmith_${state.preset}_seed${sd}${state.tile?'_tile':''}_${size}px_${bits}bit.png`,
+                  data:new Uint8Array(await blob.arrayBuffer())});
+    }
+    busy.textContent='Packing ZIP…';
+    const m=meta();
+    const info=[
+      `AlphaSmith brush pack`,
+      `Preset: ${m.name} (${state.preset})`,
+      `Brushes: ${count} · ${size}×${size} px · ${bits}-bit grayscale PNG${state.tile?' · tileable':''}`,
+      `Seeds: ${seeds.join(', ')}`,
+      `Settings: scale ${state.scale}, detail ${state.detail}, ${m.aLabel} ${state.pa}, ${m.bLabel} ${state.pb}, contrast ${state.contrast}, brightness ${state.brightness}, falloff ${state.falloff}, invert ${state.invert?'on':'off'}`,
+      ``,
+      `Recreate any of these exactly: pick the preset, enter the seed, match the settings.`,
+      `Forged free at AlphaSmith · support: ${CONFIG.patreonUrl} · guild: ${CONFIG.discordUrl}`,
+    ].join('\r\n');
+    files.push({name:'pack_info.txt',data:new TextEncoder().encode(info)});
+    const zipName=`alphasmith_${state.preset}_pack${count}${state.tile?'_tile':''}_${size}px_${bits}bit.zip`;
+    downloadBlob(makeZip(files),zipName);
+    downloads++;
+    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon ❤</a>`,6000);
+    else toast(`Downloaded ${zipName}`);
+  }catch(err){
+    console.error(err);toast('Pack export failed: '+err.message,6000);
+  }finally{busy.classList.remove('show');}
+}
+$('pack8').onclick=()=>doPack(8);
+$('pack16').onclick=()=>doPack(16);
 
 function encodePNG8(f,w,h){
   return new Promise((res,rej)=>{
