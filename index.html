@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlphaSmith — Free Alpha Brush Generator for Blender, Unreal & Photoshop</title>
+<meta name="description" content="Forge free procedural alpha brushes and height masks for Blender sculpting, Unreal landscapes and Photoshop brushes. 8-bit and 16-bit PNG export. No signup, no watermark, runs entirely in your browser.">
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23161b22"/><circle cx="32" cy="32" r="20" fill="url(%23g)"/><defs><radialGradient id="g"><stop offset="0%25" stop-color="white"/><stop offset="100%25" stop-color="%23161b22"/></radialGradient></defs></svg>'>
+<style>
+:root{
+  --bg:#0e1116; --panel:#161b22; --panel2:#1c232e; --line:#2a3441;
+  --text:#d7dee8; --dim:#8b98a9; --accent:#e8a33d; --accent2:#f0b45c;
+  --patreon:#f96854; --discord:#5865F2; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;font-size:15px}
+a{color:var(--accent2);text-decoration:none}
+button{font:inherit;cursor:pointer;border:none}
+h1{font-size:20px;letter-spacing:.5px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 16px}
+
+/* ---------- header ---------- */
+header{border-bottom:1px solid var(--line);background:linear-gradient(180deg,#131820,#0e1116)}
+.hbar{display:flex;align-items:center;gap:14px;padding:14px 0;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:10px}
+.logo svg{flex:none}
+.logo .sub{color:var(--dim);font-size:12.5px;margin-top:2px}
+.hlinks{margin-left:auto;display:flex;gap:10px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:8px;font-weight:600;font-size:13.5px;color:#fff;transition:filter .15s}
+.btn:hover{filter:brightness(1.12)}
+.btn.patreon{background:var(--patreon)}
+.btn.discord{background:var(--discord)}
+.btn.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text)}
+
+/* ---------- layout ---------- */
+main.wrap{display:grid;grid-template-columns:225px minmax(0,1fr) 305px;gap:16px;padding:18px 16px 30px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.panel h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--dim);margin-bottom:10px}
+
+/* presets */
+#presetList{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.preset{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 6px 5px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--dim)}
+.preset canvas{width:100%;aspect-ratio:1;border-radius:5px;background:#000;image-rendering:auto}
+.preset span{font-size:11.5px;line-height:1.1;text-align:center}
+.preset.active{border-color:var(--accent);color:var(--text);box-shadow:0 0 0 1px var(--accent)}
+.preset:hover{border-color:var(--accent2)}
+
+/* preview */
+.previewCard{display:flex;flex-direction:column;gap:10px}
+#previewBox{position:relative;width:100%;max-width:660px;margin:0 auto}
+#preview{width:100%;aspect-ratio:1;border-radius:8px;border:1px solid var(--line);background:#000;display:block}
+#busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,13,17,.55);border-radius:8px;font-weight:600;letter-spacing:.5px}
+#busy.show{display:flex}
+.previewRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center}
+.seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{padding:7px 14px;background:transparent;color:var(--dim);font-size:13px;font-weight:600}
+.seg button.on{background:var(--accent);color:#1a1205}
+#status{color:var(--dim);font-size:12.5px;text-align:center;min-height:16px}
+.seedRow{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+.seedRow input{width:110px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 10px;font-size:14px}
+.seedRow .btn.ghost{padding:7px 12px}
+
+/* controls */
+.ctl{margin-bottom:12px}
+.ctl label{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);margin-bottom:4px}
+.ctl label b{color:var(--text);font-weight:600}
+.ctl input[type=range]{width:100%;accent-color:var(--accent);height:22px}
+.toggleRow{display:flex;align-items:center;justify-content:space-between;margin:10px 0 4px}
+.switch{position:relative;width:40px;height:22px}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:var(--panel2);border:1px solid var(--line);border-radius:22px;transition:.15s}
+.slider:before{content:"";position:absolute;width:16px;height:16px;left:2px;top:2px;border-radius:50%;background:var(--dim);transition:.15s}
+.switch input:checked + .slider{background:var(--accent)}
+.switch input:checked + .slider:before{background:#1a1205;transform:translateX(18px)}
+
+/* export */
+.exportCard select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font-size:14px;margin-bottom:10px}
+.exportBtns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn.dl{background:var(--accent);color:#1a1205;justify-content:center;padding:11px 8px}
+.btn.dl.alt{background:var(--panel2);border:1px solid var(--accent);color:var(--accent2)}
+.exportCard .hint{color:var(--dim);font-size:12px;margin-top:8px;line-height:1.45}
+
+/* support */
+.supportCard p{color:var(--dim);font-size:13px;line-height:1.5;margin-bottom:10px}
+.supportCard .btn{width:100%;justify-content:center;margin-bottom:8px}
+
+/* how to */
+#howto{padding-bottom:34px}
+#howto .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:12px}
+#howto h3{font-size:14.5px;color:var(--accent2);margin-bottom:6px}
+#howto p{color:var(--dim);font-size:13.5px;line-height:1.55}
+#howto .panel{padding:16px}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);background:var(--panel2);border:1px solid var(--accent);color:var(--text);padding:11px 18px;border-radius:10px;font-size:13.5px;transition:transform .25s,opacity .25s;z-index:50;max-width:90vw;text-align:center;opacity:0;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto}
+
+footer{border-top:1px solid var(--line);padding:20px 0 30px;color:var(--dim);font-size:13px}
+footer .wrap{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+footer .flinks{margin-left:auto;display:flex;gap:14px}
+
+@media (max-width:980px){
+  main.wrap{grid-template-columns:1fr}
+  #presetList{grid-template-columns:repeat(auto-fill,minmax(88px,1fr))}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap hbar">
+    <div class="logo">
+      <svg width="34" height="34" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#1c232e"/><path d="M14 24h26v6c0 6-5 9-9 10v6h8v6H23v-6h8v-6c-8 0-17-4-17-12v-4z" fill="#e8a33d"/><rect x="42" y="20" width="10" height="14" rx="2" fill="#8b98a9"/></svg>
+      <div>
+        <h1>AlphaSmith</h1>
+        <div class="sub">Forge free alpha brushes for Blender · Unreal · Photoshop</div>
+      </div>
+    </div>
+    <nav class="hlinks">
+      <a class="btn patreon" id="patreonTop" target="_blank" rel="noopener">&#10084; Support on Patreon</a>
+      <a class="btn discord" id="discordTop" target="_blank" rel="noopener">Join our Discord</a>
+      <a class="btn ghost" href="#howto">How to use</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- presets -->
+  <aside class="panel">
+    <h2>Presets</h2>
+    <div id="presetList"></div>
+  </aside>
+
+  <!-- preview -->
+  <section class="panel previewCard">
+    <div class="previewRow">
+      <div class="seg" id="modeSeg">
+        <button data-mode="alpha" class="on">Alpha</button>
+        <button data-mode="relief">Sculpt preview</button>
+      </div>
+    </div>
+    <div id="previewBox">
+      <canvas id="preview" width="512" height="512"></canvas>
+      <div id="busy">Forging…</div>
+    </div>
+    <div class="seedRow">
+      <span style="color:var(--dim);font-size:13px">Seed</span>
+      <input id="seed" type="number" min="1" max="999999" value="1337">
+      <button class="btn ghost" id="dice" title="Random seed">&#127922; Randomize</button>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <!-- controls + export -->
+  <aside style="display:flex;flex-direction:column;gap:16px">
+    <div class="panel">
+      <h2>Controls</h2>
+      <div class="ctl"><label>Scale <b id="v_scale"></b></label><input type="range" id="scale" min="2" max="24" step="1" value="6"></div>
+      <div class="ctl"><label>Detail <b id="v_detail"></b></label><input type="range" id="detail" min="1" max="8" step="1" value="5"></div>
+      <div class="ctl"><label id="l_pa">Param A <b id="v_pa"></b></label><input type="range" id="pa" min="0" max="100" step="1" value="50"></div>
+      <div class="ctl"><label id="l_pb">Param B <b id="v_pb"></b></label><input type="range" id="pb" min="0" max="100" step="1" value="50"></div>
+      <div class="ctl"><label>Contrast <b id="v_contrast"></b></label><input type="range" id="contrast" min="-100" max="100" step="1" value="0"></div>
+      <div class="ctl"><label>Brightness <b id="v_brightness"></b></label><input type="range" id="brightness" min="-100" max="100" step="1" value="0"></div>
+      <div class="ctl"><label>Edge falloff <b id="v_falloff"></b></label><input type="range" id="falloff" min="0" max="100" step="1" value="0"></div>
+      <div class="toggleRow"><span style="color:var(--dim);font-size:13px">Invert</span>
+        <label class="switch"><input type="checkbox" id="invert"><span class="slider"></span></label>
+      </div>
+    </div>
+
+    <div class="panel exportCard">
+      <h2>Download</h2>
+      <select id="size">
+        <option value="512">512 × 512</option>
+        <option value="1024" selected>1024 × 1024</option>
+        <option value="2048">2048 × 2048</option>
+        <option value="4096">4096 × 4096</option>
+      </select>
+      <div class="exportBtns">
+        <button class="btn dl" id="dl8">PNG · 8-bit</button>
+        <button class="btn dl alt" id="dl16">PNG · 16-bit</button>
+      </div>
+      <div class="hint">8-bit works everywhere (Photoshop brushes, Blender sculpt alphas). 16-bit gives smoother height for Unreal landscape sculpting and Blender displacement — no stair-stepping.</div>
+    </div>
+
+    <div class="panel supportCard">
+      <h2>Free forever</h2>
+      <p>AlphaSmith is free, no signup, no watermark. If it saves you time, a coffee on Patreon keeps the forge burning.</p>
+      <a class="btn patreon" id="patreonSide" target="_blank" rel="noopener">&#10084; Support on Patreon</a>
+      <a class="btn discord" id="discordSide" target="_blank" rel="noopener">Join the guild on Discord</a>
+    </div>
+  </aside>
+</main>
+
+<!-- how to use -->
+<section id="howto" class="wrap">
+  <div class="panel">
+    <h2>How to use these alphas</h2>
+    <div class="cols">
+      <div>
+        <h3>Blender (sculpt)</h3>
+        <p>In Sculpt Mode open <em>Brush Settings → Texture → New</em>, load the PNG, and set Mapping to <em>Area Plane</em> (or Stencil). Use the Draw or Clay brush with stroke method <em>Anchored</em> or <em>Drag Dot</em> to stamp the shape. For displacement, use the 16-bit PNG in a Displace modifier with a non-color image.</p>
+      </div>
+      <div>
+        <h3>Unreal Engine (landscape)</h3>
+        <p>Import the PNG, set Compression to <em>Grayscale</em> and turn <em>sRGB off</em>. In Landscape Sculpt mode, set Brush Type to <em>Alpha</em> (or Pattern) and assign the texture. The 16-bit export keeps slopes smooth on large landscapes.</p>
+      </div>
+      <div>
+        <h3>Photoshop / Krita</h3>
+        <p>Open the PNG and choose <em>Edit → Define Brush Preset</em>. Dark areas paint, white stays transparent — hit the <em>Invert</em> toggle before downloading if you want the opposite. In Krita, use <em>Predefined brush tips → Import</em>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="year"></span> AlphaSmith · free procedural alpha brushes, made for game folk.</span>
+    <div class="flinks">
+      <a id="patreonFoot" target="_blank" rel="noopener">Patreon</a>
+      <a id="discordFoot" target="_blank" rel="noopener">Discord</a>
+    </div>
+  </div>
+</footer>
+
+<div id="toast"></div>
+
+<!-- ======================= generation engine (runs in a Web Worker) ======================= -->
+<script type="text/plain" id="engineSrc">
+'use strict';
+function mulberry32(a){return function(){a|=0;a=(a+0x6D2B79F5)|0;var t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return ((t^(t>>>14))>>>0)/4294967296;};}
+function hash2(ix,iy,seed){var h=Math.imul(ix|0,374761393)^Math.imul(iy|0,668265263)^Math.imul(seed|0,974634321);h=Math.imul(h^(h>>>13),1274126177);return ((h^(h>>>16))>>>0)/4294967295;}
+function clamp01(v){return v<0?0:v>1?1:v;}
+function sstep(t){t=clamp01(t);return t*t*(3-2*t);}
+
+function Simplex(seed){
+  var rand=mulberry32(seed|0);
+  var p=new Uint8Array(256),i;
+  for(i=0;i<256;i++)p[i]=i;
+  for(i=255;i>0;i--){var n=Math.floor(rand()*(i+1));var q=p[i];p[i]=p[n];p[n]=q;}
+  var perm=new Uint8Array(512);
+  for(i=0;i<512;i++)perm[i]=p[i&255];
+  var G=new Float32Array([1,0,-1,0,0,1,0,-1,0.70710678,0.70710678,-0.70710678,0.70710678,0.70710678,-0.70710678,-0.70710678,-0.70710678]);
+  var F2=0.36602540378,G2=0.21132486540;
+  return function(xin,yin){
+    var n0=0,n1=0,n2=0;
+    var s=(xin+yin)*F2, i0=Math.floor(xin+s), j0=Math.floor(yin+s);
+    var t=(i0+j0)*G2, x0=xin-(i0-t), y0=yin-(j0-t);
+    var i1,j1; if(x0>y0){i1=1;j1=0;}else{i1=0;j1=1;}
+    var x1=x0-i1+G2, y1=y0-j1+G2, x2=x0-1+2*G2, y2=y0-1+2*G2;
+    var ii=i0&255, jj=j0&255, gi, t0;
+    t0=0.5-x0*x0-y0*y0;
+    if(t0>0){t0*=t0;gi=(perm[ii+perm[jj]]&7)*2;n0=t0*t0*(G[gi]*x0+G[gi+1]*y0);}
+    t0=0.5-x1*x1-y1*y1;
+    if(t0>0){t0*=t0;gi=(perm[ii+i1+perm[jj+j1]]&7)*2;n1=t0*t0*(G[gi]*x1+G[gi+1]*y1);}
+    t0=0.5-x2*x2-y2*y2;
+    if(t0>0){t0*=t0;gi=(perm[ii+1+perm[jj+1]]&7)*2;n2=t0*t0*(G[gi]*x2+G[gi+1]*y2);}
+    return 70*(n0+n1+n2);
+  };
+}
+function makeFBM(noise){
+  return function(x,y,oct,gain){
+    gain=gain||0.5;
+    var a=1,f=1,sum=0,norm=0,o;
+    for(o=0;o<oct;o++){sum+=a*noise(x*f,y*f);norm+=a;a*=gain;f*=2;}
+    return sum/norm;
+  };
+}
+function worley(x,y,seed){
+  var xi=Math.floor(x),yi=Math.floor(y),f1=8,f2=8,dx,dy;
+  for(dy=-1;dy<=1;dy++)for(dx=-1;dx<=1;dx++){
+    var cx=xi+dx,cy=yi+dy;
+    var px=cx+hash2(cx,cy,seed),py=cy+hash2(cx,cy,seed+1013);
+    var ax=px-x,ay=py-y,d=Math.sqrt(ax*ax+ay*ay);
+    if(d<f1){f2=f1;f1=d;}else if(d<f2){f2=d;}
+  }
+  return [f1,f2];
+}
+function fillField(f,w,h,fn){
+  var idx=0,x,y;
+  for(y=0;y<h;y++){var v=(y+0.5)/h;for(x=0;x<w;x++){f[idx++]=fn((x+0.5)/w,v);}}
+}
+function stampRing(f,w,h,cx,cy,R,T,inten,asp){
+  asp=asp||1; // >1 squashes the ring vertically (mail rings lie at an angle)
+  var B=R+T;
+  var x0=Math.max(0,Math.floor(cx-B)),x1=Math.min(w-1,Math.ceil(cx+B));
+  var y0=Math.max(0,Math.floor(cy-B/asp)),y1=Math.min(h-1,Math.ceil(cy+B/asp));
+  for(var y=y0;y<=y1;y++)for(var x=x0;x<=x1;x++){
+    var dx=x-cx,dy=(y-cy)*asp,d=Math.sqrt(dx*dx+dy*dy);
+    var q=Math.abs(d-R);
+    if(q>=T)continue;
+    var val=inten*Math.sqrt(1-(q/T)*(q/T)); // torus cross-section
+    var i=y*w+x;
+    if(val>f[i])f[i]=val;
+  }
+}
+function stampMax(f,w,h,cx,cy,r,inten,hard){
+  if(r<0.5)r=0.5;
+  var x0=Math.max(0,Math.floor(cx-r)),x1=Math.min(w-1,Math.ceil(cx+r));
+  var y0=Math.max(0,Math.floor(cy-r)),y1=Math.min(h-1,Math.ceil(cy+r));
+  for(var y=y0;y<=y1;y++)for(var x=x0;x<=x1;x++){
+    var dx=(x-cx)/r,dy=(y-cy)/r,d2=dx*dx+dy*dy;
+    if(d2>1)continue;
+    var d=Math.sqrt(d2),fall=d<hard?1:1-sstep((d-hard)/(1-hard));
+    var i=y*w+x,val=inten*fall;
+    if(val>f[i])f[i]=val;
+  }
+}
+
+var PRESETS={
+  clouds:function(f,w,h,P){
+    var fbm=makeFBM(Simplex(P.seed)),fbm2=makeFBM(Simplex(P.seed+77));
+    var warp=P.pA*1.6,gain=0.35+P.pB*0.35,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var wx=warp?warp*fbm2(u*s*0.5+13.7,v*s*0.5,3):0;
+      var wy=warp?warp*fbm2(u*s*0.5,v*s*0.5+91.3,3):0;
+      return fbm(u*s+wx,v*s+wy,P.detail,gain);
+    });
+  },
+  ridged:function(f,w,h,P){
+    var nz=Simplex(P.seed),fbm2=makeFBM(Simplex(P.seed+31));
+    var sharp=1+P.pA*3,warp=P.pB*0.8,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var wx=warp*fbm2(u*3+7.1,v*3,2),wy=warp*fbm2(u*3,v*3+4.2,2);
+      var a=0.5,fr=1,sum=0,norm=0,weight=1,o;
+      for(o=0;o<P.detail;o++){
+        var n=nz((u+wx)*s*fr,(v+wy)*s*fr);
+        n=1-Math.abs(n); n=Math.pow(n,sharp); n*=weight; weight=clamp01(n*2);
+        sum+=a*n; norm+=a; a*=0.5; fr*=2.1;
+      }
+      return sum/norm;
+    });
+  },
+  cobble:function(f,w,h,P){
+    var fbm=makeFBM(Simplex(P.seed+3)),fbm2=makeFBM(Simplex(P.seed+51));
+    var gap=0.03+P.pA*0.22,warp=P.pB*0.5,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var wx=warp*fbm(u*4+7.7,v*4,2)*0.25,wy=warp*fbm(u*4,v*4+3.1,2)*0.25;
+      var W=worley((u+wx)*s,(v+wy)*s,P.seed);
+      var stone=sstep((W[1]-W[0])/gap);
+      var dome=clamp01(1-W[0]*1.4);
+      var detail=fbm2(u*s*4,v*s*4,3)*0.12;
+      return stone*(0.5+0.5*dome)+detail;
+    });
+  },
+  cracks:function(f,w,h,P){
+    var fbm=makeFBM(Simplex(P.seed+3));
+    var width=0.015+P.pA*0.1,warp=P.pB*0.6,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var wx=warp*fbm(u*3+7.7,v*3,3)*0.3,wy=warp*fbm(u*3,v*3+3.1,3)*0.3;
+      var W=worley((u+wx)*s,(v+wy)*s,P.seed);
+      return 1-sstep((W[1]-W[0])/width);
+    });
+  },
+  veins:function(f,w,h,P){
+    var nz=Simplex(P.seed),fbm=makeFBM(Simplex(P.seed+19));
+    var sharp=24-P.pA*20,warp=0.2+P.pB*1.2,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var wx=warp*fbm(u*2.5+5.2,v*2.5,3)*0.4,wy=warp*fbm(u*2.5,v*2.5+9.7,3)*0.4;
+      var n=nz((u+wx)*s*0.6,(v+wy)*s*0.6);
+      var v1=Math.pow(1-Math.abs(n),sharp);
+      var n2=nz((u+wy)*s*1.3+31,(v+wx)*s*1.3);
+      var v2=Math.pow(1-Math.abs(n2),sharp*1.4)*0.6;
+      return Math.max(v1,v2);
+    });
+  },
+  marble:function(f,w,h,P){
+    var fbm=makeFBM(Simplex(P.seed));
+    var warp=0.4+P.pA*3,bands=1+P.pB*9,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var n=fbm(u*s,v*s,P.detail);
+      return 0.5+0.5*Math.sin((u*0.85+v*0.4)*bands*6.28318+warp*3*n);
+    });
+  },
+  grunge:function(f,w,h,P){
+    var fbm=makeFBM(Simplex(P.seed)),fbm2=makeFBM(Simplex(P.seed+7));
+    var speck=P.pA,depth=0.3+P.pB*0.7,s=P.scale;
+    fillField(f,w,h,function(u,v){
+      var n1=fbm(u*s,v*s,P.detail)*0.5+0.5;
+      var n2=fbm2(u*s*3.7+11,v*s*3.7,Math.min(4,P.detail))*0.5+0.5;
+      var W=worley(u*s*5,v*s*5,P.seed+91);
+      var sp=clamp01(1-W[0]*1.6);
+      var val=n1*(1-depth*0.5)+n2*depth*0.5;
+      return val+speck*0.55*sp*sp*(n2>0.45?1:0.25);
+    });
+  },
+  scratches:function(f,w,h,P){
+    var rand=mulberry32(P.seed);
+    var count=Math.floor(12+P.pA*220);
+    var maxlen=(0.08+P.pB*0.55)*w;
+    var i,n=w*h;
+    for(i=0;i<n;i++)f[i]=0;
+    for(var sc=0;sc<count;sc++){
+      var x=rand()*w,y=rand()*h,ang=rand()*Math.PI*2;
+      var len=(0.3+0.7*rand())*maxlen;
+      var thick=(0.5+rand()*1.6)*(w/512);
+      var step=Math.max(0.6,thick*0.5);
+      var steps=Math.max(4,Math.ceil(len/step));
+      var inten=0.35+0.65*rand();
+      var curve=(rand()-0.5)*0.03;
+      for(var t=0;t<steps;t++){
+        var tt=t/steps,taper=Math.sin(tt*Math.PI);
+        ang+=curve;
+        x+=Math.cos(ang)*step; y+=Math.sin(ang)*step;
+        if(x<-12||y<-12||x>w+12||y>h+12)break;
+        stampMax(f,w,h,x,y,Math.max(0.6,thick*(0.35+taper)),inten*(0.25+0.75*taper),0.25);
+      }
+    }
+  },
+  dots:function(f,w,h,P){
+    var grid=Math.max(2,Math.round(P.scale));
+    var cell=w/grid;
+    var rad=cell*0.5*(0.12+0.82*P.pA);
+    var hard=Math.max(0.02,1-P.pB*0.95);
+    var i,n=w*h;
+    for(i=0;i<n;i++)f[i]=0;
+    for(var gy=0;gy<grid;gy++)for(var gx=0;gx<grid;gx++){
+      var jx=hash2(gx,gy,P.seed)-0.5,jy=hash2(gx,gy,P.seed+7)-0.5;
+      var cx=(gx+0.5+jx*0.8)*cell,cy=(gy+0.5+jy*0.8)*cell;
+      var rr=rad*(0.55+0.7*hash2(gx,gy,P.seed+13));
+      stampMax(f,w,h,cx,cy,rr,1,hard);
+    }
+  },
+  craters:function(f,w,h,P){
+    var rand=mulberry32(P.seed);
+    var count=Math.floor(3+P.pA*40);
+    var rim=P.pB;
+    var i,n=w*h;
+    for(i=0;i<n;i++)f[i]=0.5;
+    var fbm=makeFBM(Simplex(P.seed+5));
+    for(var c=0;c<count;c++){
+      var cx=rand()*w,cy=rand()*h;
+      var r=(0.035+rand()*rand()*0.16)*w;
+      var R=r*1.7;
+      var x0=Math.max(0,Math.floor(cx-R)),x1=Math.min(w-1,Math.ceil(cx+R));
+      var y0=Math.max(0,Math.floor(cy-R)),y1=Math.min(h-1,Math.ceil(cy+R));
+      for(var y=y0;y<=y1;y++)for(var x=x0;x<=x1;x++){
+        var dx=x-cx,dy=y-cy,d=Math.sqrt(dx*dx+dy*dy)/r;
+        if(d>1.7)continue;
+        var idx=y*w+x,val=0;
+        if(d<1)val=-0.45*(1-d*d);
+        var g=(d-1)*3.2;
+        val+=rim*0.5*Math.exp(-g*g);
+        f[idx]+=val*(0.75+0.5*rand()*0); // deterministic; rand kept out of pixel loop
+      }
+    }
+    // gentle surface noise
+    var s=P.scale;
+    var idx2=0;
+    for(var yy=0;yy<h;yy++){var vv=(yy+0.5)/h;for(var xx=0;xx<w;xx++){f[idx2]+=fbm((xx+0.5)/w*s,vv*s,3)*0.05;idx2++;}}
+  },
+  bark:function(f,w,h,P){
+    var nz=Simplex(P.seed),fbm=makeFBM(Simplex(P.seed+11)),fbm2=makeFBM(Simplex(P.seed+23));
+    var sharp=1.5+P.pA*3,rough=P.pB,s=P.scale;
+    var oct=Math.max(2,Math.min(5,P.detail));
+    fillField(f,w,h,function(u,v){
+      // wobble the furrows so they meander like real bark
+      var wx=0.14*fbm(u*2+3.3,v*2,3);
+      var x=(u+wx)*s,y=v*s*0.22; // anisotropic: long vertical ridges
+      var a=0.5,fr=1,sum=0,norm=0;
+      for(var o=0;o<oct;o++){
+        var n=nz(x*fr,y*fr);
+        n=1-Math.abs(n);n=Math.pow(n,sharp);
+        sum+=a*n;norm+=a;a*=0.5;fr*=2;
+      }
+      var ridge=sum/norm;
+      var det=fbm2(u*s*3,v*s*1.1,3)*0.5+0.5;      // medium plates
+      var fine=fbm2(u*s*7+41,v*s*2.6,2)*0.5+0.5;   // fine grain
+      return ridge*(0.72+0.28*det)+rough*0.22*(fine-0.5)*2*0.5;
+    });
+  },
+  chainmail:function(f,w,h,P){
+    var grid=Math.max(3,Math.round(P.scale));
+    var cell=w/grid;
+    var R=cell*0.54*(0.85+P.pA*0.35);
+    var T=Math.max(1.2,R*(0.13+P.pB*0.22));
+    var i,n=w*h;
+    for(i=0;i<n;i++)f[i]=0;
+    // classic 4-in-1 read: each ring overlaps only its diagonal neighbours below
+    var colW=cell,rowH=cell*0.72,asp=1.25;
+    var cols=Math.ceil(w/colW)+2,rows=Math.ceil(h/rowH)+2;
+    for(var ry=-1;ry<rows;ry++){
+      var offset=(ry&1)?colW*0.5:0;
+      var inten=(ry&1)?0.84:1; // alternate rows sit "under" for interlink depth
+      for(var cx=-1;cx<=cols;cx++){
+        var px=cx*colW+offset,py=ry*rowH;
+        // tiny deterministic jitter so it reads hand-made, not printed
+        px+=(hash2(cx,ry,P.seed)-0.5)*cell*0.04;
+        py+=(hash2(cx,ry,P.seed+7)-0.5)*cell*0.04;
+        stampRing(f,w,h,px,py,R,T,inten,asp);
+      }
+    }
+  },
+  damage:function(f,w,h,P){
+    var rand=mulberry32(P.seed);
+    var count=Math.max(1,Math.round(1+P.pA*8));
+    var crackLen=0.25+P.pB*0.75;
+    var i,n=w*h;
+    for(i=0;i<n;i++)f[i]=0;
+    var px512=w/512;
+    for(var imp=0;imp<count;imp++){
+      var R=(0.30-count*0.018)*w*(0.8+rand()*0.4);
+      var cx,cy;
+      if(count===1){cx=w*0.5+(rand()-0.5)*w*0.06;cy=h*0.5+(rand()-0.5)*h*0.06;}
+      else{cx=R*0.6+rand()*(w-R*1.2);cy=R*0.6+rand()*(h-R*1.2);}
+      // central pit: soft core + close overlapping dabs that merge into one ragged splat
+      stampMax(f,w,h,cx,cy,R*0.5,1,0.25);
+      var halo=20+Math.floor(rand()*8);
+      for(var hd=0;hd<halo;hd++){
+        var ha=rand()*Math.PI*2,hr=R*rand()*0.34;
+        stampMax(f,w,h,cx+Math.cos(ha)*hr,cy+Math.sin(ha)*hr,R*(0.16+rand()*0.22),0.85+0.15*rand(),0.3);
+      }
+      // radial cracks — evenly spread, mixed long and stubby, tapering out
+      var nc=4+Math.floor(rand()*4);
+      for(var c=0;c<nc;c++){
+        var ang=(c/nc)*Math.PI*2+(rand()-0.5)*0.9;
+        var stub=rand()<0.35;
+        var len=R*(stub?0.25+rand()*0.3:0.5+rand()*0.9)*crackLen*2;
+        var x=cx+Math.cos(ang)*R*0.32,y=cy+Math.sin(ang)*R*0.32;
+        var thick=Math.max(0.8,R*0.075*(0.7+rand()*0.6));
+        var step=Math.max(0.5,thick*0.35);
+        var steps=Math.max(5,Math.ceil(len/step));
+        for(var t=0;t<steps;t++){
+          var tt=t/steps;
+          ang+=(rand()-0.5)*0.12; // jagged wander
+          x+=Math.cos(ang)*step;y+=Math.sin(ang)*step;
+          if(x<-8||y<-8||x>w+8||y>h+8)break;
+          var taperR=Math.max(0.5,thick*(1-tt*0.85));
+          stampMax(f,w,h,x,y,taperR,(1-tt*0.7)*(0.8+0.2*rand()),0.25);
+        }
+      }
+      // debris specks around the impact
+      var deb=14+Math.floor(rand()*18);
+      for(var k=0;k<deb;k++){
+        var da=rand()*Math.PI*2,dd=R*(0.5+rand()*0.8);
+        stampMax(f,w,h,cx+Math.cos(da)*dd,cy+Math.sin(da)*dd,(0.6+rand()*2.2)*px512,0.3+0.5*rand(),0.3);
+      }
+    }
+  }
+};
+
+function post(f,w,h,P){
+  var n=w*h,i,mn=Infinity,mx=-Infinity;
+  for(i=0;i<n;i++){var q=f[i];if(q<mn)mn=q;if(q>mx)mx=q;}
+  var range=(mx-mn)||1;
+  var slope=P.contrast>=0?1+P.contrast*4:1+P.contrast*0.999;
+  var hasFall=P.falloff>0.001;
+  var start=1-P.falloff;
+  i=0;
+  for(var y=0;y<h;y++){
+    var vv=((y+0.5)/h-0.5)*2;
+    for(var x=0;x<w;x++,i++){
+      var uu=((x+0.5)/w-0.5)*2;
+      var v=(f[i]-mn)/range;
+      v=0.5+(v-0.5)*slope+P.brightness*0.5;
+      if(hasFall){
+        var d=Math.sqrt(uu*uu+vv*vv);
+        v*=1-sstep((d-start)/Math.max(0.0001,P.falloff));
+      }
+      if(P.invert)v=1-v;
+      f[i]=v<0?0:v>1?1:v;
+    }
+  }
+}
+
+onmessage=function(e){
+  var m=e.data;
+  var w=m.size,h=m.size;
+  var f=new Float32Array(w*h);
+  var t0=performance.now();
+  PRESETS[m.preset](f,w,h,m.params);
+  post(f,w,h,m.params);
+  postMessage({id:m.id,size:w,ms:performance.now()-t0,data:f.buffer},[f.buffer]);
+};
+</script>
+
+<!-- ======================= app ======================= -->
+<script>
+'use strict';
+/* ==================== CONFIG — edit your links here ==================== */
+const CONFIG = {
+  siteName:  'AlphaSmith',
+  patreonUrl:'https://www.patreon.com/rinellasky',
+  discordUrl:'https://discord.gg/a8sjdRFjz',
+};
+/* ======================================================================= */
+
+const PRESET_META=[
+  {id:'clouds',   name:'Clouds',      aLabel:'Warp',      bLabel:'Roughness', a:30,b:50},
+  {id:'ridged',   name:'Ridged Rock', aLabel:'Sharpness', bLabel:'Warp',      a:45,b:25},
+  {id:'cobble',   name:'Cobblestone', aLabel:'Gap Width', bLabel:'Warp',      a:40,b:35},
+  {id:'cracks',   name:'Cracks',      aLabel:'Width',     bLabel:'Warp',      a:30,b:45},
+  {id:'veins',    name:'Veins',       aLabel:'Thickness', bLabel:'Warp',      a:40,b:50},
+  {id:'marble',   name:'Marble Swirl',aLabel:'Warp',      bLabel:'Bands',     a:55,b:35},
+  {id:'grunge',   name:'Grunge',      aLabel:'Speckle',   bLabel:'Depth',     a:50,b:55},
+  {id:'scratches',name:'Scratches',   aLabel:'Count',     bLabel:'Length',    a:40,b:40},
+  {id:'dots',     name:'Stipple Dots',aLabel:'Dot Size',  bLabel:'Softness',  a:55,b:45},
+  {id:'craters',  name:'Craters',     aLabel:'Count',     bLabel:'Rim Height',a:45,b:60},
+  {id:'bark',     name:'Tree Bark',   aLabel:'Ridge Depth',bLabel:'Roughness',a:50,b:45},
+  {id:'chainmail',name:'Chainmail',   aLabel:'Ring Size', bLabel:'Wire Gauge',a:50,b:50},
+  {id:'damage',   name:'Damage Decal',aLabel:'Impacts',   bLabel:'Crack Length',a:10,b:50},
+];
+
+// wire links
+for(const [id,url] of [['patreonTop',CONFIG.patreonUrl],['patreonSide',CONFIG.patreonUrl],['patreonFoot',CONFIG.patreonUrl],
+                       ['discordTop',CONFIG.discordUrl],['discordSide',CONFIG.discordUrl],['discordFoot',CONFIG.discordUrl]])
+  document.getElementById(id).href=url;
+document.getElementById('year').textContent=new Date().getFullYear();
+
+// ---------- worker ----------
+const worker=new Worker(URL.createObjectURL(new Blob(
+  [document.getElementById('engineSrc').textContent],{type:'application/javascript'})));
+let reqId=0; const pending=new Map();
+worker.onmessage=e=>{
+  const m=e.data,cb=pending.get(m.id);
+  if(cb){pending.delete(m.id);cb(m);}
+};
+function render(preset,params,size){
+  return new Promise(res=>{
+    const id=++reqId;
+    pending.set(id,res);
+    worker.postMessage({id,preset,params,size});
+  });
+}
+
+// ---------- state ----------
+const $=id=>document.getElementById(id);
+const state={
+  preset:'ridged', seed:1337, scale:6, detail:5, pa:45, pb:25,
+  contrast:0, brightness:0, falloff:0, invert:false, mode:'alpha',
+};
+function params(){
+  return {
+    seed:state.seed|0, scale:+state.scale, detail:+state.detail,
+    pA:state.pa/100, pB:state.pb/100,
+    contrast:state.contrast/100, brightness:state.brightness/100,
+    falloff:state.falloff/100, invert:!!state.invert,
+  };
+}
+
+// ---------- preset gallery ----------
+const listEl=$('presetList');
+const thumbCanvases={};
+for(const p of PRESET_META){
+  const b=document.createElement('button');
+  b.className='preset'+(p.id===state.preset?' active':'');
+  b.dataset.id=p.id;
+  const c=document.createElement('canvas');c.width=96;c.height=96;
+  const s=document.createElement('span');s.textContent=p.name;
+  b.append(c,s);
+  b.onclick=()=>selectPreset(p.id);
+  listEl.appendChild(b);
+  thumbCanvases[p.id]=c;
+}
+function meta(){return PRESET_META.find(p=>p.id===state.preset);}
+function selectPreset(id){
+  state.preset=id;
+  const m=PRESET_META.find(p=>p.id===id);
+  state.pa=m.a; state.pb=m.b;
+  $('pa').value=m.a; $('pb').value=m.b;
+  document.querySelectorAll('.preset').forEach(el=>el.classList.toggle('active',el.dataset.id===id));
+  syncLabels(); requestPreview();
+}
+
+// ---------- controls ----------
+const sliders=['scale','detail','pa','pb','contrast','brightness','falloff'];
+for(const s of sliders){
+  $(s).addEventListener('input',()=>{state[s]=+$(s).value;syncLabels();requestPreview();});
+}
+$('invert').addEventListener('change',()=>{state.invert=$('invert').checked;requestPreview();});
+$('seed').addEventListener('change',()=>{state.seed=Math.max(1,Math.min(999999,+$('seed').value||1));$('seed').value=state.seed;requestPreview();});
+$('dice').onclick=()=>{state.seed=1+Math.floor(Math.random()*999998);$('seed').value=state.seed;requestPreview();};
+document.querySelectorAll('#modeSeg button').forEach(b=>{
+  b.onclick=()=>{
+    state.mode=b.dataset.mode;
+    document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.toggle('on',x===b));
+    if(lastField)paint(lastField,previewSize);
+  };
+});
+function syncLabels(){
+  const m=meta();
+  $('l_pa').firstChild.textContent=m.aLabel+' ';
+  $('l_pb').firstChild.textContent=m.bLabel+' ';
+  $('v_scale').textContent=state.scale;
+  $('v_detail').textContent=state.detail;
+  $('v_pa').textContent=state.pa;
+  $('v_pb').textContent=state.pb;
+  $('v_contrast').textContent=state.contrast;
+  $('v_brightness').textContent=state.brightness;
+  $('v_falloff').textContent=state.falloff;
+}
+
+// ---------- preview ----------
+const previewSize=512;
+const pcan=$('preview'),pctx=pcan.getContext('2d');
+let lastField=null,previewToken=0,previewTimer=null;
+function requestPreview(){
+  clearTimeout(previewTimer);
+  previewTimer=setTimeout(async()=>{
+    const tok=++previewToken;
+    const r=await render(state.preset,params(),previewSize);
+    if(tok!==previewToken)return;
+    lastField=new Float32Array(r.data);
+    paint(lastField,previewSize);
+    $('status').textContent=`${meta().name} · ${previewSize}×${previewSize} · ${r.ms.toFixed(0)} ms`;
+  },90);
+}
+function paint(f,size){
+  const img=pctx.createImageData(size,size);
+  const d=img.data;
+  if(state.mode==='alpha'){
+    for(let i=0,j=0;i<f.length;i++,j+=4){
+      const g=Math.round(f[i]*255);
+      d[j]=g;d[j+1]=g;d[j+2]=g;d[j+3]=255;
+    }
+  }else{
+    // simple relief shading: light from upper-left
+    const str=size*0.9;
+    const lx=-0.55,ly=-0.6,lz=0.58; // normalized-ish
+    for(let y=0;y<size;y++){
+      for(let x=0;x<size;x++){
+        const i=y*size+x;
+        const xr=x<size-1?f[i+1]:f[i], xl=x>0?f[i-1]:f[i];
+        const yd=y<size-1?f[i+size]:f[i], yu=y>0?f[i-size]:f[i];
+        let nx=(xl-xr)*str/2, ny=(yu-yd)*str/2, nz=1;
+        const len=Math.sqrt(nx*nx+ny*ny+1);
+        nx/=len;ny/=len;nz/=len;
+        let shade=nx*lx+ny*ly+nz*lz;
+        shade=Math.max(0,shade);
+        const base=30+200*shade+f[i]*25;
+        const j=i*4;
+        d[j]=base*0.98;d[j+1]=base*0.92;d[j+2]=base*0.82;d[j+3]=255;
+      }
+    }
+  }
+  pctx.putImageData(img,0,0);
+}
+
+// ---------- thumbnails ----------
+(async function thumbs(){
+  for(const p of PRESET_META){
+    const P={seed:99,scale:6,detail:5,pA:p.a/100,pB:p.b/100,contrast:0.15,brightness:0,falloff:0,invert:false};
+    const r=await render(p.id,P,96);
+    const f=new Float32Array(r.data);
+    const c=thumbCanvases[p.id],ctx=c.getContext('2d');
+    const img=ctx.createImageData(96,96);
+    for(let i=0,j=0;i<f.length;i++,j+=4){
+      const g=Math.round(f[i]*255);
+      img.data[j]=g;img.data[j+1]=g;img.data[j+2]=g;img.data[j+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+  }
+})();
+
+// ---------- export ----------
+const busy=$('busy');
+function toast(msg,ms=3500){
+  const t=$('toast');t.innerHTML=msg;t.classList.add('show');
+  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),ms);
+}
+function downloadBlob(blob,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);
+}
+let downloads=0;
+async function doExport(bits){
+  const size=+$('size').value;
+  busy.textContent=`Forging ${size}×${size}…`;busy.classList.add('show');
+  try{
+    const r=await render(state.preset,params(),size);
+    const f=new Float32Array(r.data);
+    const blob=bits===16?await encodePNG16(f,size,size):await encodePNG8(f,size,size);
+    const name=`alphasmith_${state.preset}_seed${state.seed}_${size}px_${bits}bit.png`;
+    downloadBlob(blob,name);
+    downloads++;
+    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon ❤</a>`,6000);
+    else toast(`Downloaded ${name}`);
+  }catch(err){
+    console.error(err);toast('Export failed: '+err.message,6000);
+  }finally{busy.classList.remove('show');}
+}
+$('dl8').onclick=()=>doExport(8);
+$('dl16').onclick=()=>doExport(16);
+
+function encodePNG8(f,w,h){
+  return new Promise((res,rej)=>{
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    const ctx=c.getContext('2d');
+    const img=ctx.createImageData(w,h);
+    for(let i=0,j=0;i<f.length;i++,j+=4){
+      const g=Math.round(f[i]*255);
+      img.data[j]=g;img.data[j+1]=g;img.data[j+2]=g;img.data[j+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+    c.toBlob(b=>b?res(b):rej(new Error('canvas export failed')),'image/png');
+  });
+}
+
+// ----- 16-bit grayscale PNG encoder -----
+const crcTable=(()=>{const t=new Int32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c;}return t;})();
+function crc32(bytes,start,len){let c=-1;for(let i=start;i<start+len;i++)c=crcTable[(c^bytes[i])&255]^(c>>>8);return (c^-1)>>>0;}
+function pngChunk(type,data){
+  const out=new Uint8Array(12+data.length);
+  const dv=new DataView(out.buffer);
+  dv.setUint32(0,data.length);
+  for(let i=0;i<4;i++)out[4+i]=type.charCodeAt(i);
+  out.set(data,8);
+  dv.setUint32(8+data.length,crc32(out,4,4+data.length));
+  return out;
+}
+async function deflateZlib(u8){
+  if(typeof CompressionStream!=='undefined'){
+    const cs=new CompressionStream('deflate');
+    const ab=await new Response(new Blob([u8]).stream().pipeThrough(cs)).arrayBuffer();
+    return new Uint8Array(ab);
+  }
+  // fallback: stored zlib blocks
+  const blocks=Math.max(1,Math.ceil(u8.length/65535));
+  const out=new Uint8Array(2+u8.length+5*blocks+4);
+  out[0]=0x78;out[1]=0x01;
+  let p=2,i=0;
+  do{
+    const len=Math.min(65535,u8.length-i);
+    const last=(i+len>=u8.length)?1:0;
+    out[p++]=last;out[p++]=len&255;out[p++]=(len>>8)&255;out[p++]=(~len)&255;out[p++]=((~len)>>8)&255;
+    out.set(u8.subarray(i,i+len),p);p+=len;i+=len;
+  }while(i<u8.length);
+  let a=1,b=0;
+  for(i=0;i<u8.length;i++){a=(a+u8[i])%65521;b=(b+a)%65521;}
+  out[p++]=(b>>8)&255;out[p++]=b&255;out[p++]=(a>>8)&255;out[p++]=a&255;
+  return out.subarray(0,p);
+}
+async function encodePNG16(f,w,h){
+  // raw scanlines: filter byte 0 + 16-bit big-endian gray
+  const raw=new Uint8Array(h*(1+w*2));
+  let p=0;
+  for(let y=0;y<h;y++){
+    raw[p++]=0;
+    for(let x=0;x<w;x++){
+      let v=f[y*w+x];v=v<0?0:v>1?1:v;
+      const u=Math.round(v*65535);
+      raw[p++]=u>>8;raw[p++]=u&255;
+    }
+  }
+  const idat=await deflateZlib(raw);
+  const ihdr=new Uint8Array(13);
+  const dv=new DataView(ihdr.buffer);
+  dv.setUint32(0,w);dv.setUint32(4,h);
+  ihdr[8]=16;  // bit depth
+  ihdr[9]=0;   // color type 0 = grayscale
+  ihdr[10]=0;ihdr[11]=0;ihdr[12]=0;
+  const sig=new Uint8Array([137,80,78,71,13,10,26,10]);
+  const c1=pngChunk('IHDR',ihdr),c2=pngChunk('IDAT',idat),c3=pngChunk('IEND',new Uint8Array(0));
+  const blob=new Blob([sig,c1,c2,c3],{type:'image/png'});
+  return blob;
+}
+
+// ---------- boot ----------
+syncLabels();
+requestPreview();
+</script>
+</body>
+</html>
