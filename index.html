@@ -137,6 +137,7 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
       <div class="seg" id="modeSeg">
         <button data-mode="alpha" class="on">Alpha</button>
         <button data-mode="relief">Sculpt preview</button>
+        <button data-mode="tiled">2×2 Tile</button>
       </div>
     </div>
     <div id="previewBox">
@@ -165,6 +166,9 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
       <div class="toggleRow"><span style="color:var(--dim);font-size:13px">Invert</span>
         <label class="switch"><input type="checkbox" id="invert"><span class="slider"></span></label>
       </div>
+      <div class="toggleRow"><span style="color:var(--dim);font-size:13px" title="Edges wrap seamlessly — repeat the brush like a texture">Tileable (seamless)</span>
+        <label class="switch"><input type="checkbox" id="tileable"><span class="slider"></span></label>
+      </div>
     </div>
 
     <div class="panel exportCard">
@@ -179,7 +183,7 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
         <button class="btn dl" id="dl8">PNG · 8-bit</button>
         <button class="btn dl alt" id="dl16">PNG · 16-bit</button>
       </div>
-      <div class="hint">8-bit works everywhere (Photoshop brushes, Blender sculpt alphas). 16-bit gives smoother height for Unreal landscape sculpting and Blender displacement — no stair-stepping.</div>
+      <div class="hint">8-bit works everywhere (Photoshop brushes, Blender sculpt alphas). 16-bit gives smoother height for Unreal landscape sculpting and Blender displacement — no stair-stepping. Turn on <em>Tileable</em> to make textures that repeat seamlessly.</div>
     </div>
 
     <div class="panel supportCard">
@@ -265,11 +269,68 @@ function makeFBM(noise){
     return sum/norm;
   };
 }
+
+/* ---- periodic (tileable) noise: gradient lattice that wraps at integer periods ---- */
+var NSC=1.75; // scales PNoise output to match Simplex contrast (calibrated: simplex std 0.379 / pnoise std 0.214)
+var PGRAD=new Float32Array([1,0,-1,0,0,1,0,-1,0.70710678,0.70710678,-0.70710678,0.70710678,0.70710678,-0.70710678,-0.70710678,-0.70710678]);
+function PNoise(seed){
+  var rand=mulberry32(seed|0);
+  var p=new Uint8Array(256),i;
+  for(i=0;i<256;i++)p[i]=i;
+  for(i=255;i>0;i--){var n=Math.floor(rand()*(i+1));var q=p[i];p[i]=p[n];p[n]=q;}
+  var perm=new Uint8Array(512);
+  for(i=0;i<512;i++)perm[i]=p[i&255];
+  var G=PGRAD;
+  return function(x,y,px,py){
+    px|=0; py|=0; if(px<1)px=1; if(py<1)py=1;
+    var xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi;
+    var u=xf*xf*xf*(xf*(xf*6-15)+10),v=yf*yf*yf*(yf*(yf*6-15)+10);
+    var x0=xi,x1=xi+1,y0=yi,y1=yi+1;
+    if(x0<0||x0>=px)x0-=Math.floor(x0/px)*px;
+    if(x1<0||x1>=px)x1-=Math.floor(x1/px)*px;
+    if(y0<0||y0>=py)y0-=Math.floor(y0/py)*py;
+    if(y1<0||y1>=py)y1-=Math.floor(y1/py)*py;
+    x0&=255;x1&=255;y0&=255;y1&=255;
+    var g00=(perm[x0+perm[y0]]&7)*2,g10=(perm[x1+perm[y0]]&7)*2;
+    var g01=(perm[x0+perm[y1]]&7)*2,g11=(perm[x1+perm[y1]]&7)*2;
+    var n00=G[g00]*xf+G[g00+1]*yf,      n10=G[g10]*(xf-1)+G[g10+1]*yf;
+    var n01=G[g01]*xf+G[g01+1]*(yf-1),  n11=G[g11]*(xf-1)+G[g11+1]*(yf-1);
+    var nx0=n00+(n10-n00)*u,nx1=n01+(n11-n01)*u;
+    return nx0+(nx1-nx0)*v;
+  };
+}
+function makeFBMT(pnz,px,py){
+  return function(x,y,oct,gain){
+    gain=gain||0.5;
+    var a=1,f=1,sum=0,norm=0,o;
+    for(o=0;o<oct;o++){sum+=a*pnz(x*f,y*f,px*f,py*f)*NSC;norm+=a;a*=gain;f*=2;}
+    return sum/norm;
+  };
+}
+// tile? periodic fbm with periods (px,py) : original simplex fbm — identical to pre-tileable behavior
+function mkFBM(seed,px,py,tile){
+  return tile?makeFBMT(PNoise(seed),px,py):makeFBM(Simplex(seed));
+}
 function worley(x,y,seed){
   var xi=Math.floor(x),yi=Math.floor(y),f1=8,f2=8,dx,dy;
   for(dy=-1;dy<=1;dy++)for(dx=-1;dx<=1;dx++){
     var cx=xi+dx,cy=yi+dy;
     var px=cx+hash2(cx,cy,seed),py=cy+hash2(cx,cy,seed+1013);
+    var ax=px-x,ay=py-y,d=Math.sqrt(ax*ax+ay*ay);
+    if(d<f1){f2=f1;f1=d;}else if(d<f2){f2=d;}
+  }
+  return [f1,f2];
+}
+// periodic worley: feature-point cells repeat every per cells, so edges match exactly
+function worleyT(x,y,seed,per){
+  per=Math.max(1,Math.round(per));
+  var xi=Math.floor(x),yi=Math.floor(y),f1=8,f2=8,dx,dy;
+  for(dy=-1;dy<=1;dy++)for(dx=-1;dx<=1;dx++){
+    var cx=xi+dx,cy=yi+dy;
+    var wx=cx,wy=cy;
+    while(wx<0)wx+=per; while(wx>=per)wx-=per;
+    while(wy<0)wy+=per; while(wy>=per)wy-=per;
+    var px=cx+hash2(wx,wy,seed),py=cy+hash2(wx,wy,seed+1013);
     var ax=px-x,ay=py-y,d=Math.sqrt(ax*ax+ay*ay);
     if(d<f1){f2=f1;f1=d;}else if(d<f2){f2=d;}
   }
@@ -306,36 +367,61 @@ function stampMax(f,w,h,cx,cy,r,inten,hard){
   }
 }
 
+// toroidal stamp wrappers: with tile on, stamps crossing an edge continue on the opposite side
+function stampMaxW(f,w,h,cx,cy,r,inten,hard,tile){
+  if(!tile){stampMax(f,w,h,cx,cy,r,inten,hard);return;}
+  cx=((cx%w)+w)%w; cy=((cy%h)+h)%h;
+  for(var oy=-1;oy<=1;oy++)for(var ox=-1;ox<=1;ox++){
+    var X=cx+ox*w,Y=cy+oy*h;
+    if(X+r<0||X-r>w-1||Y+r<0||Y-r>h-1)continue;
+    stampMax(f,w,h,X,Y,r,inten,hard);
+  }
+}
+function stampRingW(f,w,h,cx,cy,R,T,inten,asp,tile){
+  if(!tile){stampRing(f,w,h,cx,cy,R,T,inten,asp);return;}
+  asp=asp||1;
+  var B=R+T;
+  cx=((cx%w)+w)%w; cy=((cy%h)+h)%h;
+  for(var oy=-1;oy<=1;oy++)for(var ox=-1;ox<=1;ox++){
+    var X=cx+ox*w,Y=cy+oy*h;
+    if(X+B<0||X-B>w-1||Y+B/asp<0||Y-B/asp>h-1)continue;
+    stampRing(f,w,h,X,Y,R,T,inten,asp);
+  }
+}
+
 var PRESETS={
   clouds:function(f,w,h,P){
-    var fbm=makeFBM(Simplex(P.seed)),fbm2=makeFBM(Simplex(P.seed+77));
-    var warp=P.pA*1.6,gain=0.35+P.pB*0.35,s=P.scale;
+    var warp=P.pA*1.6,gain=0.35+P.pB*0.35,s=P.scale,T=P.tile;
+    var sh=T?Math.max(1,Math.round(s*0.5)):s*0.5;
+    var fbm=mkFBM(P.seed,s,s,T),fbm2=mkFBM(P.seed+77,sh,sh,T);
     fillField(f,w,h,function(u,v){
-      var wx=warp?warp*fbm2(u*s*0.5+13.7,v*s*0.5,3):0;
-      var wy=warp?warp*fbm2(u*s*0.5,v*s*0.5+91.3,3):0;
+      var wx=warp?warp*fbm2(u*sh+13.7,v*sh,3):0;
+      var wy=warp?warp*fbm2(u*sh,v*sh+91.3,3):0;
       return fbm(u*s+wx,v*s+wy,P.detail,gain);
     });
   },
   ridged:function(f,w,h,P){
-    var nz=Simplex(P.seed),fbm2=makeFBM(Simplex(P.seed+31));
-    var sharp=1+P.pA*3,warp=P.pB*0.8,s=P.scale;
+    var sharp=1+P.pA*3,warp=P.pB*0.8,s=P.scale,T=P.tile;
+    var nz=T?PNoise(P.seed):Simplex(P.seed);
+    var fbm2=mkFBM(P.seed+31,3,3,T);
+    var frm=T?2:2.1; // tile mode needs integer octave periods
     fillField(f,w,h,function(u,v){
       var wx=warp*fbm2(u*3+7.1,v*3,2),wy=warp*fbm2(u*3,v*3+4.2,2);
       var a=0.5,fr=1,sum=0,norm=0,weight=1,o;
       for(o=0;o<P.detail;o++){
-        var n=nz((u+wx)*s*fr,(v+wy)*s*fr);
-        n=1-Math.abs(n); n=Math.pow(n,sharp); n*=weight; weight=clamp01(n*2);
-        sum+=a*n; norm+=a; a*=0.5; fr*=2.1;
+        var n=T?clamp01(1-Math.abs(nz((u+wx)*s*fr,(v+wy)*s*fr,s*fr,s*fr)*NSC)):1-Math.abs(nz((u+wx)*s*fr,(v+wy)*s*fr));
+        n=Math.pow(n,sharp); n*=weight; weight=clamp01(n*2);
+        sum+=a*n; norm+=a; a*=0.5; fr*=frm;
       }
       return sum/norm;
     });
   },
   cobble:function(f,w,h,P){
-    var fbm=makeFBM(Simplex(P.seed+3)),fbm2=makeFBM(Simplex(P.seed+51));
-    var gap=0.03+P.pA*0.22,warp=P.pB*0.5,s=P.scale;
+    var gap=0.03+P.pA*0.22,warp=P.pB*0.5,s=P.scale,T=P.tile;
+    var fbm=mkFBM(P.seed+3,4,4,T),fbm2=mkFBM(P.seed+51,4*s,4*s,T);
     fillField(f,w,h,function(u,v){
       var wx=warp*fbm(u*4+7.7,v*4,2)*0.25,wy=warp*fbm(u*4,v*4+3.1,2)*0.25;
-      var W=worley((u+wx)*s,(v+wy)*s,P.seed);
+      var W=T?worleyT((u+wx)*s,(v+wy)*s,P.seed,s):worley((u+wx)*s,(v+wy)*s,P.seed);
       var stone=sstep((W[1]-W[0])/gap);
       var dome=clamp01(1-W[0]*1.4);
       var detail=fbm2(u*s*4,v*s*4,3)*0.12;
@@ -343,41 +429,48 @@ var PRESETS={
     });
   },
   cracks:function(f,w,h,P){
-    var fbm=makeFBM(Simplex(P.seed+3));
-    var width=0.015+P.pA*0.1,warp=P.pB*0.6,s=P.scale;
+    var width=0.015+P.pA*0.1,warp=P.pB*0.6,s=P.scale,T=P.tile;
+    var fbm=mkFBM(P.seed+3,3,3,T);
     fillField(f,w,h,function(u,v){
       var wx=warp*fbm(u*3+7.7,v*3,3)*0.3,wy=warp*fbm(u*3,v*3+3.1,3)*0.3;
-      var W=worley((u+wx)*s,(v+wy)*s,P.seed);
+      var W=T?worleyT((u+wx)*s,(v+wy)*s,P.seed,s):worley((u+wx)*s,(v+wy)*s,P.seed);
       return 1-sstep((W[1]-W[0])/width);
     });
   },
   veins:function(f,w,h,P){
-    var nz=Simplex(P.seed),fbm=makeFBM(Simplex(P.seed+19));
-    var sharp=24-P.pA*20,warp=0.2+P.pB*1.2,s=P.scale;
+    var sharp=24-P.pA*20,warp=0.2+P.pB*1.2,s=P.scale,T=P.tile;
+    var nz=T?PNoise(P.seed):Simplex(P.seed);
+    var q06=T?Math.max(1,Math.round(s*0.6)):s*0.6;
+    var q13=T?Math.max(1,Math.round(s*1.3)):s*1.3;
+    var wf=T?3:2.5;
+    var fbm=mkFBM(P.seed+19,wf,wf,T);
     fillField(f,w,h,function(u,v){
-      var wx=warp*fbm(u*2.5+5.2,v*2.5,3)*0.4,wy=warp*fbm(u*2.5,v*2.5+9.7,3)*0.4;
-      var n=nz((u+wx)*s*0.6,(v+wy)*s*0.6);
-      var v1=Math.pow(1-Math.abs(n),sharp);
-      var n2=nz((u+wy)*s*1.3+31,(v+wx)*s*1.3);
-      var v2=Math.pow(1-Math.abs(n2),sharp*1.4)*0.6;
+      var wx=warp*fbm(u*wf+5.2,v*wf,3)*0.4,wy=warp*fbm(u*wf,v*wf+9.7,3)*0.4;
+      var n=T?clamp01(1-Math.abs(nz((u+wx)*q06,(v+wy)*q06,q06,q06)*NSC)):1-Math.abs(nz((u+wx)*q06,(v+wy)*q06));
+      var v1=Math.pow(n,sharp);
+      var n2=T?clamp01(1-Math.abs(nz((u+wy)*q13+31,(v+wx)*q13,q13,q13)*NSC)):1-Math.abs(nz((u+wy)*q13+31,(v+wx)*q13));
+      var v2=Math.pow(n2,sharp*1.4)*0.6;
       return Math.max(v1,v2);
     });
   },
   marble:function(f,w,h,P){
-    var fbm=makeFBM(Simplex(P.seed));
-    var warp=0.4+P.pA*3,bands=1+P.pB*9,s=P.scale;
+    var warp=0.4+P.pA*3,bands=1+P.pB*9,s=P.scale,T=P.tile;
+    var fbm=mkFBM(P.seed,s,s,T);
+    var kx=T?Math.max(1,Math.round(0.85*bands)):0.85*bands;
+    var ky=T?Math.round(0.4*bands):0.4*bands;
     fillField(f,w,h,function(u,v){
       var n=fbm(u*s,v*s,P.detail);
-      return 0.5+0.5*Math.sin((u*0.85+v*0.4)*bands*6.28318+warp*3*n);
+      return 0.5+0.5*Math.sin((u*kx+v*ky)*6.28318+warp*3*n);
     });
   },
   grunge:function(f,w,h,P){
-    var fbm=makeFBM(Simplex(P.seed)),fbm2=makeFBM(Simplex(P.seed+7));
-    var speck=P.pA,depth=0.3+P.pB*0.7,s=P.scale;
+    var speck=P.pA,depth=0.3+P.pB*0.7,s=P.scale,T=P.tile;
+    var q37=T?Math.max(1,Math.round(s*3.7)):s*3.7;
+    var fbm=mkFBM(P.seed,s,s,T),fbm2=mkFBM(P.seed+7,q37,q37,T);
     fillField(f,w,h,function(u,v){
       var n1=fbm(u*s,v*s,P.detail)*0.5+0.5;
-      var n2=fbm2(u*s*3.7+11,v*s*3.7,Math.min(4,P.detail))*0.5+0.5;
-      var W=worley(u*s*5,v*s*5,P.seed+91);
+      var n2=fbm2(u*q37+11,v*q37,Math.min(4,P.detail))*0.5+0.5;
+      var W=T?worleyT(u*s*5,v*s*5,P.seed+91,5*s):worley(u*s*5,v*s*5,P.seed+91);
       var sp=clamp01(1-W[0]*1.6);
       var val=n1*(1-depth*0.5)+n2*depth*0.5;
       return val+speck*0.55*sp*sp*(n2>0.45?1:0.25);
@@ -401,8 +494,8 @@ var PRESETS={
         var tt=t/steps,taper=Math.sin(tt*Math.PI);
         ang+=curve;
         x+=Math.cos(ang)*step; y+=Math.sin(ang)*step;
-        if(x<-12||y<-12||x>w+12||y>h+12)break;
-        stampMax(f,w,h,x,y,Math.max(0.6,thick*(0.35+taper)),inten*(0.25+0.75*taper),0.25);
+        if(!P.tile&&(x<-12||y<-12||x>w+12||y>h+12))break;
+        stampMaxW(f,w,h,x,y,Math.max(0.6,thick*(0.35+taper)),inten*(0.25+0.75*taper),0.25,P.tile);
       }
     }
   },
@@ -417,7 +510,7 @@ var PRESETS={
       var jx=hash2(gx,gy,P.seed)-0.5,jy=hash2(gx,gy,P.seed+7)-0.5;
       var cx=(gx+0.5+jx*0.8)*cell,cy=(gy+0.5+jy*0.8)*cell;
       var rr=rad*(0.55+0.7*hash2(gx,gy,P.seed+13));
-      stampMax(f,w,h,cx,cy,rr,1,hard);
+      stampMaxW(f,w,h,cx,cy,rr,1,hard,P.tile);
     }
   },
   craters:function(f,w,h,P){
@@ -426,45 +519,76 @@ var PRESETS={
     var rim=P.pB;
     var i,n=w*h;
     for(i=0;i<n;i++)f[i]=0.5;
-    var fbm=makeFBM(Simplex(P.seed+5));
-    for(var c=0;c<count;c++){
-      var cx=rand()*w,cy=rand()*h;
-      var r=(0.035+rand()*rand()*0.16)*w;
-      var R=r*1.7;
-      var x0=Math.max(0,Math.floor(cx-R)),x1=Math.min(w-1,Math.ceil(cx+R));
-      var y0=Math.max(0,Math.floor(cy-R)),y1=Math.min(h-1,Math.ceil(cy+R));
-      for(var y=y0;y<=y1;y++)for(var x=x0;x<=x1;x++){
-        var dx=x-cx,dy=y-cy,d=Math.sqrt(dx*dx+dy*dy)/r;
-        if(d>1.7)continue;
-        var idx=y*w+x,val=0;
-        if(d<1)val=-0.45*(1-d*d);
-        var g=(d-1)*3.2;
-        val+=rim*0.5*Math.exp(-g*g);
-        f[idx]+=val*(0.75+0.5*rand()*0); // deterministic; rand kept out of pixel loop
-      }
-    }
-    // gentle surface noise
     var s=P.scale;
-    var idx2=0;
-    for(var yy=0;yy<h;yy++){var vv=(yy+0.5)/h;for(var xx=0;xx<w;xx++){f[idx2]+=fbm((xx+0.5)/w*s,vv*s,3)*0.05;idx2++;}}
+    if(!P.tile){
+      var fbm=makeFBM(Simplex(P.seed+5));
+      for(var c=0;c<count;c++){
+        var cx=rand()*w,cy=rand()*h;
+        var r=(0.035+rand()*rand()*0.16)*w;
+        var R=r*1.7;
+        var x0=Math.max(0,Math.floor(cx-R)),x1=Math.min(w-1,Math.ceil(cx+R));
+        var y0=Math.max(0,Math.floor(cy-R)),y1=Math.min(h-1,Math.ceil(cy+R));
+        for(var y=y0;y<=y1;y++)for(var x=x0;x<=x1;x++){
+          var dx=x-cx,dy=y-cy,d=Math.sqrt(dx*dx+dy*dy)/r;
+          if(d>1.7)continue;
+          var idx=y*w+x,val=0;
+          if(d<1)val=-0.45*(1-d*d);
+          var g=(d-1)*3.2;
+          val+=rim*0.5*Math.exp(-g*g);
+          f[idx]+=val*(0.75+0.5*rand()*0); // deterministic; rand kept out of pixel loop
+        }
+      }
+      var idx2=0;
+      for(var yy=0;yy<h;yy++){var vv=(yy+0.5)/h;for(var xx=0;xx<w;xx++){f[idx2]+=fbm((xx+0.5)/w*s,vv*s,3)*0.05;idx2++;}}
+    }else{
+      var fbmT=mkFBM(P.seed+5,s,s,true);
+      for(var c2=0;c2<count;c2++){
+        var ccx=rand()*w,ccy=rand()*h;
+        var r2=(0.035+rand()*rand()*0.16)*w;
+        var R2=r2*1.7;
+        for(var oy=-1;oy<=1;oy++)for(var ox=-1;ox<=1;ox++){
+          var CX=ccx+ox*w,CY=ccy+oy*h;
+          if(CX+R2<0||CX-R2>w-1||CY+R2<0||CY-R2>h-1)continue;
+          var xa=Math.max(0,Math.floor(CX-R2)),xb=Math.min(w-1,Math.ceil(CX+R2));
+          var ya=Math.max(0,Math.floor(CY-R2)),yb=Math.min(h-1,Math.ceil(CY+R2));
+          for(var y2=ya;y2<=yb;y2++)for(var x2=xa;x2<=xb;x2++){
+            var dx2=x2-CX,dy2=y2-CY,d2=Math.sqrt(dx2*dx2+dy2*dy2)/r2;
+            if(d2>1.7)continue;
+            var idxT=y2*w+x2,valT=0;
+            if(d2<1)valT=-0.45*(1-d2*d2);
+            var g2=(d2-1)*3.2;
+            valT+=rim*0.5*Math.exp(-g2*g2);
+            f[idxT]+=valT*0.75;
+          }
+        }
+      }
+      var idx3=0;
+      for(var yy2=0;yy2<h;yy2++){var vv2=(yy2+0.5)/h;for(var xx2=0;xx2<w;xx2++){f[idx3]+=fbmT((xx2+0.5)/w*s,vv2*s,3)*0.05;idx3++;}}
+    }
   },
   bark:function(f,w,h,P){
-    var nz=Simplex(P.seed),fbm=makeFBM(Simplex(P.seed+11)),fbm2=makeFBM(Simplex(P.seed+23));
-    var sharp=1.5+P.pA*3,rough=P.pB,s=P.scale;
+    var sharp=1.5+P.pA*3,rough=P.pB,s=P.scale,T=P.tile;
+    var nz=T?PNoise(P.seed):Simplex(P.seed);
+    var fbm=mkFBM(P.seed+11,2,2,T);
+    var sy=T?Math.max(1,Math.round(s*0.22)):s*0.22;   // ridge y-frequency (quantized when tiling)
+    var d3=T?Math.max(1,Math.round(s*1.1)):s*1.1;     // plate y-frequency
+    var f26=T?Math.max(1,Math.round(s*2.6)):s*2.6;    // grain y-frequency
+    var fbm2=mkFBM(P.seed+23,s*3,d3,T);               // plates
+    var fbm3=T?mkFBM(P.seed+23,s*7,f26,T):fbm2;       // grain (same noise instance when not tiling)
     var oct=Math.max(2,Math.min(5,P.detail));
     fillField(f,w,h,function(u,v){
       // wobble the furrows so they meander like real bark
       var wx=0.14*fbm(u*2+3.3,v*2,3);
-      var x=(u+wx)*s,y=v*s*0.22; // anisotropic: long vertical ridges
+      var x=(u+wx)*s,y=v*sy; // anisotropic: long vertical ridges
       var a=0.5,fr=1,sum=0,norm=0;
       for(var o=0;o<oct;o++){
-        var n=nz(x*fr,y*fr);
-        n=1-Math.abs(n);n=Math.pow(n,sharp);
+        var n=T?clamp01(1-Math.abs(nz(x*fr,y*fr,s*fr,sy*fr)*NSC)):1-Math.abs(nz(x*fr,y*fr));
+        n=Math.pow(n,sharp);
         sum+=a*n;norm+=a;a*=0.5;fr*=2;
       }
       var ridge=sum/norm;
-      var det=fbm2(u*s*3,v*s*1.1,3)*0.5+0.5;      // medium plates
-      var fine=fbm2(u*s*7+41,v*s*2.6,2)*0.5+0.5;   // fine grain
+      var det=fbm2(u*s*3,v*d3,3)*0.5+0.5;      // medium plates
+      var fine=fbm3(u*s*7+41,v*f26,2)*0.5+0.5; // fine grain
       return ridge*(0.72+0.28*det)+rough*0.22*(fine-0.5)*2*0.5;
     });
   },
@@ -476,17 +600,34 @@ var PRESETS={
     var i,n=w*h;
     for(i=0;i<n;i++)f[i]=0;
     // classic 4-in-1 read: each ring overlaps only its diagonal neighbours below
-    var colW=cell,rowH=cell*0.72,asp=1.25;
-    var cols=Math.ceil(w/colW)+2,rows=Math.ceil(h/rowH)+2;
-    for(var ry=-1;ry<rows;ry++){
-      var offset=(ry&1)?colW*0.5:0;
-      var inten=(ry&1)?0.84:1; // alternate rows sit "under" for interlink depth
-      for(var cx=-1;cx<=cols;cx++){
-        var px=cx*colW+offset,py=ry*rowH;
-        // tiny deterministic jitter so it reads hand-made, not printed
-        px+=(hash2(cx,ry,P.seed)-0.5)*cell*0.04;
-        py+=(hash2(cx,ry,P.seed+7)-0.5)*cell*0.04;
-        stampRing(f,w,h,px,py,R,T,inten,asp);
+    var colW=cell,asp=1.25;
+    if(!P.tile){
+      var rowH=cell*0.72;
+      var cols=Math.ceil(w/colW)+2,rows=Math.ceil(h/rowH)+2;
+      for(var ry=-1;ry<rows;ry++){
+        var offset=(ry&1)?colW*0.5:0;
+        var inten=(ry&1)?0.84:1; // alternate rows sit "under" for interlink depth
+        for(var cx=-1;cx<=cols;cx++){
+          var px=cx*colW+offset,py=ry*rowH;
+          // tiny deterministic jitter so it reads hand-made, not printed
+          px+=(hash2(cx,ry,P.seed)-0.5)*cell*0.04;
+          py+=(hash2(cx,ry,P.seed+7)-0.5)*cell*0.04;
+          stampRing(f,w,h,px,py,R,T,inten,asp);
+        }
+      }
+    }else{
+      // tiling: even row count so the offset/depth parity wraps, rows quantized to fit exactly
+      var nrows=Math.max(2,2*Math.round(h/(cell*0.72)/2));
+      var rowH2=h/nrows;
+      for(var ry2=0;ry2<nrows;ry2++){
+        var offset2=(ry2&1)?colW*0.5:0;
+        var inten2=(ry2&1)?0.84:1;
+        for(var cx2=0;cx2<grid;cx2++){
+          var px2=cx2*colW+offset2,py2=ry2*rowH2;
+          px2+=(hash2(cx2,ry2,P.seed)-0.5)*cell*0.04;
+          py2+=(hash2(cx2,ry2,P.seed+7)-0.5)*cell*0.04;
+          stampRingW(f,w,h,px2,py2,R,T,inten2,asp,true);
+        }
       }
     }
   },
@@ -503,11 +644,11 @@ var PRESETS={
       if(count===1){cx=w*0.5+(rand()-0.5)*w*0.06;cy=h*0.5+(rand()-0.5)*h*0.06;}
       else{cx=R*0.6+rand()*(w-R*1.2);cy=R*0.6+rand()*(h-R*1.2);}
       // central pit: soft core + close overlapping dabs that merge into one ragged splat
-      stampMax(f,w,h,cx,cy,R*0.5,1,0.25);
+      stampMaxW(f,w,h,cx,cy,R*0.5,1,0.25,P.tile);
       var halo=20+Math.floor(rand()*8);
       for(var hd=0;hd<halo;hd++){
         var ha=rand()*Math.PI*2,hr=R*rand()*0.34;
-        stampMax(f,w,h,cx+Math.cos(ha)*hr,cy+Math.sin(ha)*hr,R*(0.16+rand()*0.22),0.85+0.15*rand(),0.3);
+        stampMaxW(f,w,h,cx+Math.cos(ha)*hr,cy+Math.sin(ha)*hr,R*(0.16+rand()*0.22),0.85+0.15*rand(),0.3,P.tile);
       }
       // radial cracks — evenly spread, mixed long and stubby, tapering out
       var nc=4+Math.floor(rand()*4);
@@ -523,16 +664,16 @@ var PRESETS={
           var tt=t/steps;
           ang+=(rand()-0.5)*0.12; // jagged wander
           x+=Math.cos(ang)*step;y+=Math.sin(ang)*step;
-          if(x<-8||y<-8||x>w+8||y>h+8)break;
+          if(!P.tile&&(x<-8||y<-8||x>w+8||y>h+8))break;
           var taperR=Math.max(0.5,thick*(1-tt*0.85));
-          stampMax(f,w,h,x,y,taperR,(1-tt*0.7)*(0.8+0.2*rand()),0.25);
+          stampMaxW(f,w,h,x,y,taperR,(1-tt*0.7)*(0.8+0.2*rand()),0.25,P.tile);
         }
       }
       // debris specks around the impact
       var deb=14+Math.floor(rand()*18);
       for(var k=0;k<deb;k++){
         var da=rand()*Math.PI*2,dd=R*(0.5+rand()*0.8);
-        stampMax(f,w,h,cx+Math.cos(da)*dd,cy+Math.sin(da)*dd,(0.6+rand()*2.2)*px512,0.3+0.5*rand(),0.3);
+        stampMaxW(f,w,h,cx+Math.cos(da)*dd,cy+Math.sin(da)*dd,(0.6+rand()*2.2)*px512,0.3+0.5*rand(),0.3,P.tile);
       }
     }
   }
@@ -626,14 +767,14 @@ function render(preset,params,size){
 const $=id=>document.getElementById(id);
 const state={
   preset:'ridged', seed:1337, scale:6, detail:5, pa:45, pb:25,
-  contrast:0, brightness:0, falloff:0, invert:false, mode:'alpha',
+  contrast:0, brightness:0, falloff:0, invert:false, tile:false, mode:'alpha',
 };
 function params(){
   return {
     seed:state.seed|0, scale:+state.scale, detail:+state.detail,
     pA:state.pa/100, pB:state.pb/100,
     contrast:state.contrast/100, brightness:state.brightness/100,
-    falloff:state.falloff/100, invert:!!state.invert,
+    falloff:state.falloff/100, invert:!!state.invert, tile:!!state.tile,
   };
 }
 
@@ -667,6 +808,7 @@ for(const s of sliders){
   $(s).addEventListener('input',()=>{state[s]=+$(s).value;syncLabels();requestPreview();});
 }
 $('invert').addEventListener('change',()=>{state.invert=$('invert').checked;requestPreview();});
+$('tileable').addEventListener('change',()=>{state.tile=$('tileable').checked;requestPreview();});
 $('seed').addEventListener('change',()=>{state.seed=Math.max(1,Math.min(999999,+$('seed').value||1));$('seed').value=state.seed;requestPreview();});
 $('dice').onclick=()=>{state.seed=1+Math.floor(Math.random()*999998);$('seed').value=state.seed;requestPreview();};
 document.querySelectorAll('#modeSeg button').forEach(b=>{
@@ -701,7 +843,7 @@ function requestPreview(){
     if(tok!==previewToken)return;
     lastField=new Float32Array(r.data);
     paint(lastField,previewSize);
-    $('status').textContent=`${meta().name} · ${previewSize}×${previewSize} · ${r.ms.toFixed(0)} ms`;
+    $('status').textContent=`${meta().name}${state.tile?' \u00b7 tileable':''} \u00b7 ${previewSize}\u00d7${previewSize} \u00b7 ${r.ms.toFixed(0)} ms`;
   },90);
 }
 function paint(f,size){
@@ -711,6 +853,15 @@ function paint(f,size){
     for(let i=0,j=0;i<f.length;i++,j+=4){
       const g=Math.round(f[i]*255);
       d[j]=g;d[j+1]=g;d[j+2]=g;d[j+3]=255;
+    }
+  }else if(state.mode==='tiled'){
+    // the brush repeated 2x2 - seams (if any) show at the cross in the middle
+    for(let y=0;y<size;y++){
+      for(let x=0;x<size;x++){
+        const g=Math.round(f[((y*2)%size)*size+((x*2)%size)]*255);
+        const j=(y*size+x)*4;
+        d[j]=g;d[j+1]=g;d[j+2]=g;d[j+3]=255;
+      }
     }
   }else{
     // simple relief shading: light from upper-left
@@ -766,15 +917,15 @@ function downloadBlob(blob,name){
 let downloads=0;
 async function doExport(bits){
   const size=+$('size').value;
-  busy.textContent=`Forging ${size}×${size}…`;busy.classList.add('show');
+  busy.textContent=`Forging ${size}\u00d7${size}\u2026`;busy.classList.add('show');
   try{
     const r=await render(state.preset,params(),size);
     const f=new Float32Array(r.data);
     const blob=bits===16?await encodePNG16(f,size,size):await encodePNG8(f,size,size);
-    const name=`alphasmith_${state.preset}_seed${state.seed}_${size}px_${bits}bit.png`;
+    const name=`alphasmith_${state.preset}_seed${state.seed}${state.tile?'_tile':''}_${size}px_${bits}bit.png`;
     downloadBlob(blob,name);
     downloads++;
-    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon ❤</a>`,6000);
+    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon \u2764</a>`,6000);
     else toast(`Downloaded ${name}`);
   }catch(err){
     console.error(err);toast('Export failed: '+err.message,6000);

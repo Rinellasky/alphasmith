@@ -7,6 +7,7 @@ Forge grayscale alpha masks / height stamps entirely in your browser — no sign
 ## Features
 
 - 13 procedural presets: Clouds, Ridged Rock, Cobblestone, Cracks, Veins, Marble Swirl, Grunge, Scratches, Stipple Dots, Craters, Tree Bark, Chainmail, Damage Decal
+- **Tileable / seamless mode** — periodic noise + toroidal stamping so brushes repeat with zero seams (2×2 tile preview built in)
 - Seeded generation — the same seed + settings always reproduces the same brush
 - Live sculpt-relief preview (see the alpha as if stamped into clay)
 - Universal controls: scale, detail, contrast, brightness, edge falloff (for round brush tips), invert
@@ -46,7 +47,6 @@ Everything is in `index.html`:
 
 ## Roadmap ideas
 
-- Seamless/tileable mode (periodic noise)
 - Batch "brush pack" ZIP export
 - Photoshop `.abr` packaging
 - Shareable settings URLs
