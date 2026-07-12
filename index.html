@@ -1086,9 +1086,11 @@ async function doPack(bits){
 $('pack8').onclick=()=>doPack(8);
 $('pack16').onclick=()=>doPack(16);
 
-// ----- ABR (Photoshop brush) export: v6.1 sampled-brush format -----
-// Layout per brush item (all big-endian): uint32 innerLen · pascal-string 36-char id ·
-// 8 unknown bytes · uint16 depth · int32 rect[4] · uint16 depth · byte compress=0 · raw 8-bit data · pad to 4
+// ----- ABR (Photoshop brush) export -----
+// Writes the modern v6.2 format (samp + patt + desc sections) reverse-engineered
+// from brush files Photoshop itself ships/accepts. desc is a serialized
+// ActionDescriptor of brushPreset objects; samp holds PackBits-compressed 8-bit
+// tips in a 56-slot channel table, which also keeps GIMP/Krita compatibility.
 function mulberryHex(a){
   return function(n){
     let s='';
@@ -1105,39 +1107,117 @@ function abrUUID(seed){
   const r=mulberryHex(seed);
   return r(8)+'-'+r(4)+'-'+r(4)+'-'+r(4)+'-'+r(12);
 }
-function makeABR(brushes){
-  const items=[];
-  let sampLen=0;
-  for(const b of brushes){
-    const inner=47+16+2+1+b.data.length;
-    const pad=(4-(inner%4))&3;
-    const buf=new Uint8Array(4+inner+pad);
-    const dv=new DataView(buf.buffer);
-    dv.setUint32(0,inner);
-    let o=4;
-    const id=abrUUID(b.seed);
-    buf[o++]=36;
-    for(let i=0;i<36;i++)buf[o++]=id.charCodeAt(i);
-    o+=8;                       // unknown, zeros
-    dv.setUint16(o,8);o+=2;     // depth (bits)
-    dv.setInt32(o,0);o+=4;      // top
-    dv.setInt32(o,0);o+=4;      // left
-    dv.setInt32(o,b.h);o+=4;    // bottom
-    dv.setInt32(o,b.w);o+=4;    // right
-    dv.setUint16(o,8);o+=2;     // depth again
-    buf[o++]=0;                 // compression: raw
-    buf.set(b.data,o);
-    items.push(buf);
-    sampLen+=buf.length;
+function packBitsRow(row){
+  const out=[];let i=0;const n=row.length;
+  while(i<n){
+    let j=i;
+    while(j<n-1&&row[j]===row[j+1]&&j-i<127)j++;
+    if(j>i+1){out.push((257-(j-i+1))&255,row[i]);i=j+1;}
+    else{
+      let k=i;
+      while(k<n&&k-i<128){
+        if(k<n-2&&row[k]===row[k+1]&&row[k]===row[k+2])break;
+        k++;
+      }
+      out.push(k-i-1);
+      for(let q=i;q<k;q++)out.push(row[q]);
+      i=k;
+    }
   }
-  const head=new Uint8Array(16);
-  const hv=new DataView(head.buffer);
-  hv.setInt16(0,6);            // version 6
-  hv.setInt16(2,1);            // minor 1
-  head[4]=0x38;head[5]=0x42;head[6]=0x49;head[7]=0x4D; // 8BIM
-  head[8]=0x73;head[9]=0x61;head[10]=0x6D;head[11]=0x70; // samp
-  hv.setUint32(12,sampLen);
-  return new Blob([head,...items],{type:'application/octet-stream'});
+  return out;
+}
+function rleChannel(data,w,h){
+  const rows=[];let total=0;
+  for(let y=0;y<h;y++){const r=packBitsRow(data.subarray(y*w,(y+1)*w));rows.push(r);total+=r.length;}
+  const out=new Uint8Array(h*2+total);
+  const dv=new DataView(out.buffer);
+  let o=h*2;
+  rows.forEach((r,y)=>{dv.setUint16(y*2,r.length);out.set(r,o);o+=r.length;});
+  return out;
+}
+class ByteWriter{
+  constructor(){this.parts=[];this.len=0;}
+  push(u8){this.parts.push(u8);this.len+=u8.length;}
+  u8(v){this.push(new Uint8Array([v&255]));}
+  u16(v){const b=new Uint8Array(2);new DataView(b.buffer).setUint16(0,v);this.push(b);}
+  i16(v){const b=new Uint8Array(2);new DataView(b.buffer).setInt16(0,v);this.push(b);}
+  u32(v){const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,v);this.push(b);}
+  i32(v){const b=new Uint8Array(4);new DataView(b.buffer).setInt32(0,v);this.push(b);}
+  f64(v){const b=new Uint8Array(8);new DataView(b.buffer).setFloat64(0,v);this.push(b);}
+  ascii(s){const b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i)&255;this.push(b);}
+  ustr(s){s+='\u0000';this.u32(s.length);const b=new Uint8Array(s.length*2);for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);b[i*2]=c>>8;b[i*2+1]=c&255;}this.push(b);}
+  key(k){if(k.length===4){this.u32(0);this.ascii(k);}else{this.u32(k.length);this.ascii(k);}}
+  bytes(){const out=new Uint8Array(this.len);let o=0;for(const p of this.parts){out.set(p,o);o+=p.length;}return out;}
+}
+function abrSampItem(uuid,w,h,data){
+  const comp=rleChannel(data,w,h);
+  const arrLen=4+16+2+1+comp.length;
+  const bw=new ByteWriter();
+  bw.u8(36);bw.ascii(uuid);
+  bw.i16(1);bw.i16(0);
+  bw.u32(3);
+  bw.u32(16+4+220+8+arrLen+8);      // VMAL length: rect..trailing masks
+  bw.i32(0);bw.i32(0);bw.i32(h);bw.i32(w);
+  bw.u32(56);                        // channel slot count (as Photoshop writes)
+  bw.push(new Uint8Array(220));      // 55 unwritten slots
+  bw.u32(1);bw.u32(arrLen);          // written flag + array length
+  bw.u32(8);                         // pixel depth
+  bw.i32(0);bw.i32(0);bw.i32(h);bw.i32(w);
+  bw.u16(8);bw.u8(1);                // depth, compression=PackBits
+  bw.push(comp);
+  bw.push(new Uint8Array(8));        // user mask + sheet mask: unwritten
+  const body=bw.bytes();
+  const out=new ByteWriter();
+  out.u32(body.length);out.push(body);
+  const pad=(4-((4+body.length)%4))&3;
+  if(pad)out.push(new Uint8Array(pad));
+  return out.bytes();
+}
+function descWrite(bw,d){
+  bw.ustr(d._name||'');bw.key(d._class);
+  const keys=Object.keys(d).filter(k=>k[0]!=='_');
+  bw.u32(keys.length);
+  for(const k of keys){bw.key(k);descItem(bw,d[k]);}
+}
+function descItem(bw,v){
+  if(Array.isArray(v)){
+    if(v.length===2&&typeof v[0]==='string'&&v[0].length===4&&typeof v[1]==='number'){
+      bw.ascii('UntF');bw.ascii(v[0]);bw.f64(v[1]);return;
+    }
+    bw.ascii('VlLs');bw.u32(v.length);
+    for(const e of v)descItem(bw,e);return;
+  }
+  if(typeof v==='object'){bw.ascii('Objc');descWrite(bw,v);return;}
+  if(typeof v==='boolean'){bw.ascii('bool');bw.u8(v?1:0);return;}
+  if(typeof v==='number'){bw.ascii('doub');bw.f64(v);return;}
+  if(typeof v==='string'){bw.ascii('TEXT');bw.ustr(v);return;}
+  throw new Error('desc type');
+}
+function abrBrushPreset(name,uuid,size){
+  return {_name:'',_class:'brushPreset','Nm  ':name,
+    Brsh:{_name:'',_class:'sampledBrush',
+      Dmtr:['#Pxl',size],Angl:['#Ang',0],Rndn:['#Prc',100],'Nm  ':name,
+      Spcn:['#Prc',25],Intr:true,flipX:false,flipY:false,sampledData:uuid},
+    useTipDynamics:false,useScatter:false,
+    dualBrush:{_name:'',_class:'dualBrush',useDualBrush:false},
+    brushGroup:{_name:'',_class:'brushGroup',useBrushGroup:false},
+    useTexture:false,usePaintDynamics:false,useColorDynamics:false,
+    Wtdg:false,Nose:false,'Rpt ':false,useBrushSize:false,useBrushPose:false};
+}
+function makeABR(brushes){
+  const bw=new ByteWriter();
+  bw.i16(6);bw.i16(2);
+  const samp=new ByteWriter();
+  for(const b of brushes)samp.push(abrSampItem(b.uuid,b.w,b.h,b.data));
+  const sampBytes=samp.bytes();
+  bw.ascii('8BIMsamp');bw.u32(sampBytes.length);bw.push(sampBytes);
+  bw.ascii('8BIMpatt');bw.u32(0);
+  const desc=new ByteWriter();
+  desc.u32(16);
+  descWrite(desc,{_name:'',_class:'null',Brsh:brushes.map(b=>abrBrushPreset(b.name,b.uuid,b.w))});
+  const descBytes=desc.bytes();
+  bw.ascii('8BIMdesc');bw.u32(descBytes.length);bw.push(descBytes);
+  return new Blob([bw.bytes()],{type:'application/octet-stream'});
 }
 async function doPackABR(){
   const size=+$('size').value,count=+$('packCount').value;
@@ -1146,20 +1226,21 @@ async function doPackABR(){
     const brushes=[];
     for(let i=0;i<count;i++){
       const sd=packSeed(state.seed,i);
-      busy.textContent=`Forging ${i+1} / ${count}…`;
+      busy.textContent=`Forging ${i+1} / ${count}\u2026`;
       const P=Object.assign(params(),{seed:sd});
       const r=await render(state.preset,P,size);
       const f=new Float32Array(r.data);
       const data=new Uint8Array(f.length);
       for(let j=0;j<f.length;j++)data[j]=Math.round((f[j]<0?0:f[j]>1?1:f[j])*255);
-      brushes.push({w:size,h:size,seed:sd,data});
+      brushes.push({w:size,h:size,seed:sd,uuid:abrUUID(sd),data,
+                    name:'AlphaSmith '+meta().name+' '+sd+(state.tile?' tile':'')});
     }
-    busy.textContent='Writing ABR…';
+    busy.textContent='Writing ABR\u2026';
     const name=`alphasmith_${state.preset}_pack${count}${state.tile?'_tile':''}_${size}px.abr`;
     downloadBlob(makeABR(brushes),name);
     downloads++;
-    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon ❤</a>`,6000);
-    else toast(`Downloaded ${name} — in Photoshop: Brushes panel menu → Import Brushes`);
+    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon \u2764</a>`,6000);
+    else toast(`Downloaded ${name} \u2014 in Photoshop: Brushes panel menu \u2192 Import Brushes`);
   }catch(err){
     console.error(err);toast('ABR export failed: '+err.message,6000);
   }finally{busy.classList.remove('show');}
