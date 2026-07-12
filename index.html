@@ -148,6 +148,7 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
       <span style="color:var(--dim);font-size:13px">Seed</span>
       <input id="seed" type="number" min="1" max="999999" value="1337">
       <button class="btn ghost" id="dice" title="Random seed">&#127922; Randomize</button>
+      <button class="btn ghost" id="share" title="Copy a link that recreates this exact brush">&#128279; Share</button>
     </div>
     <div id="status"></div>
   </section>
@@ -194,7 +195,10 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
         <button class="btn dl" id="pack8">ZIP · 8-bit</button>
         <button class="btn dl alt" id="pack16">ZIP · 16-bit</button>
       </div>
-      <div class="hint">Bundles seed variations of the current preset + settings into one ZIP (uses the size above, starts from your seed). Heads-up: 16-bit at 4096 makes very large files.</div>
+      <div class="exportBtns" style="margin-top:8px;grid-template-columns:1fr">
+        <button class="btn dl alt" id="packAbr">ABR · Photoshop brushes</button>
+      </div>
+      <div class="hint">Bundles seed variations of the current preset + settings (uses the size above, starts from your seed). ABR imports straight into Photoshop, Krita or GIMP as a brush set — bright areas paint. Heads-up: 16-bit at 4096 makes very large files.</div>
     </div>
 
     <div class="panel supportCard">
@@ -224,6 +228,15 @@ footer .flinks{margin-left:auto;display:flex;gap:14px}
         <p>Open the PNG and choose <em>Edit → Define Brush Preset</em>. Dark areas paint, white stays transparent — hit the <em>Invert</em> toggle before downloading if you want the opposite. In Krita, use <em>Predefined brush tips → Import</em>.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- community gallery -->
+<section id="community" class="wrap" style="padding-bottom:34px">
+  <div class="panel" style="padding:16px">
+    <h2>Community brushes</h2>
+    <div id="galleryGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:12px"></div>
+    <p style="color:var(--dim);font-size:13px;margin-top:12px;line-height:1.5">Forged something good? Hit <em>Share</em> above and post your link in the <a id="discordGallery" target="_blank" rel="noopener">guild Discord</a> — favorites get added here with your name on them.</p>
   </div>
 </section>
 
@@ -754,7 +767,7 @@ const PRESET_META=[
 
 // wire links
 for(const [id,url] of [['patreonTop',CONFIG.patreonUrl],['patreonSide',CONFIG.patreonUrl],['patreonFoot',CONFIG.patreonUrl],
-                       ['discordTop',CONFIG.discordUrl],['discordSide',CONFIG.discordUrl],['discordFoot',CONFIG.discordUrl]])
+                       ['discordTop',CONFIG.discordUrl],['discordSide',CONFIG.discordUrl],['discordFoot',CONFIG.discordUrl],['discordGallery',CONFIG.discordUrl]])
   document.getElementById(id).href=url;
 document.getElementById('year').textContent=new Date().getFullYear();
 
@@ -822,6 +835,50 @@ $('invert').addEventListener('change',()=>{state.invert=$('invert').checked;requ
 $('tileable').addEventListener('change',()=>{state.tile=$('tileable').checked;requestPreview();});
 $('seed').addEventListener('change',()=>{state.seed=Math.max(1,Math.min(999999,+$('seed').value||1));$('seed').value=state.seed;requestPreview();});
 $('dice').onclick=()=>{state.seed=1+Math.floor(Math.random()*999998);$('seed').value=state.seed;requestPreview();};
+
+// ---------- shareable settings URLs ----------
+function buildShareURL(){
+  const q=new URLSearchParams({p:state.preset,s:state.seed,sc:state.scale,d:state.detail,
+    a:state.pa,b:state.pb,c:state.contrast,br:state.brightness,f:state.falloff,
+    i:state.invert?1:0,t:state.tile?1:0});
+  return location.href.split('#')[0]+'#'+q.toString();
+}
+$('share').onclick=async()=>{
+  const url=buildShareURL();
+  history.replaceState(null,'','#'+url.split('#')[1]);
+  let copied=false;
+  try{await navigator.clipboard.writeText(url);copied=true;}
+  catch(e){
+    const ta=document.createElement('textarea');ta.value=url;document.body.appendChild(ta);ta.select();
+    try{copied=document.execCommand('copy');}catch(e2){}
+    ta.remove();
+  }
+  toast(copied?'Link copied — anyone who opens it gets this exact brush':'Couldn’t copy automatically — the link is in your address bar',5000);
+};
+function applyHash(){
+  if(location.hash.length<2)return;
+  try{
+    const q=new URLSearchParams(location.hash.slice(1));
+    const num=(k,lo,hi,def)=>{const r=q.get(k);if(r===null||r==='')return def;const v=+r;return isFinite(v)?Math.min(hi,Math.max(lo,Math.round(v))):def;};
+    const p=q.get('p');
+    if(p&&PRESET_META.some(m=>m.id===p))state.preset=p;
+    state.seed=num('s',1,999999,state.seed);
+    state.scale=num('sc',2,24,state.scale);
+    state.detail=num('d',1,8,state.detail);
+    state.pa=num('a',0,100,state.pa);
+    state.pb=num('b',0,100,state.pb);
+    state.contrast=num('c',-100,100,state.contrast);
+    state.brightness=num('br',-100,100,state.brightness);
+    state.falloff=num('f',0,100,state.falloff);
+    state.invert=q.get('i')==='1';
+    state.tile=q.get('t')==='1';
+    $('seed').value=state.seed;$('scale').value=state.scale;$('detail').value=state.detail;
+    $('pa').value=state.pa;$('pb').value=state.pb;$('contrast').value=state.contrast;
+    $('brightness').value=state.brightness;$('falloff').value=state.falloff;
+    $('invert').checked=state.invert;$('tileable').checked=state.tile;
+    document.querySelectorAll('.preset').forEach(el=>el.classList.toggle('active',el.dataset.id===state.preset));
+  }catch(e){console.warn('Ignoring malformed share link',e);}
+}
 document.querySelectorAll('#modeSeg button').forEach(b=>{
   b.onclick=()=>{
     state.mode=b.dataset.mode;
@@ -854,7 +911,7 @@ function requestPreview(){
     if(tok!==previewToken)return;
     lastField=new Float32Array(r.data);
     paint(lastField,previewSize);
-    $('status').textContent=`${meta().name}${state.tile?' \u00b7 tileable':''} \u00b7 ${previewSize}\u00d7${previewSize} \u00b7 ${r.ms.toFixed(0)} ms`;
+    $('status').textContent=`${meta().name}${state.tile?' · tileable':''} · ${previewSize}×${previewSize} · ${r.ms.toFixed(0)} ms`;
   },90);
 }
 function paint(f,size){
@@ -928,7 +985,7 @@ function downloadBlob(blob,name){
 let downloads=0;
 async function doExport(bits){
   const size=+$('size').value;
-  busy.textContent=`Forging ${size}\u00d7${size}\u2026`;busy.classList.add('show');
+  busy.textContent=`Forging ${size}×${size}…`;busy.classList.add('show');
   try{
     const r=await render(state.preset,params(),size);
     const f=new Float32Array(r.data);
@@ -936,7 +993,7 @@ async function doExport(bits){
     const name=`alphasmith_${state.preset}_seed${state.seed}${state.tile?'_tile':''}_${size}px_${bits}bit.png`;
     downloadBlob(blob,name);
     downloads++;
-    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon \u2764</a>`,6000);
+    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon ❤</a>`,6000);
     else toast(`Downloaded ${name}`);
   }catch(err){
     console.error(err);toast('Export failed: '+err.message,6000);
@@ -1029,6 +1086,86 @@ async function doPack(bits){
 $('pack8').onclick=()=>doPack(8);
 $('pack16').onclick=()=>doPack(16);
 
+// ----- ABR (Photoshop brush) export: v6.1 sampled-brush format -----
+// Layout per brush item (all big-endian): uint32 innerLen · pascal-string 36-char id ·
+// 8 unknown bytes · uint16 depth · int32 rect[4] · uint16 depth · byte compress=0 · raw 8-bit data · pad to 4
+function mulberryHex(a){
+  return function(n){
+    let s='';
+    while(s.length<n){
+      a|=0;a=(a+0x6D2B79F5)|0;
+      let t=Math.imul(a^(a>>>15),1|a);
+      t=(t+Math.imul(t^(t>>>7),61|t))^t;
+      s+=(((t^(t>>>14))>>>0)).toString(16).padStart(8,'0');
+    }
+    return s.slice(0,n);
+  };
+}
+function abrUUID(seed){
+  const r=mulberryHex(seed);
+  return r(8)+'-'+r(4)+'-'+r(4)+'-'+r(4)+'-'+r(12);
+}
+function makeABR(brushes){
+  const items=[];
+  let sampLen=0;
+  for(const b of brushes){
+    const inner=47+16+2+1+b.data.length;
+    const pad=(4-(inner%4))&3;
+    const buf=new Uint8Array(4+inner+pad);
+    const dv=new DataView(buf.buffer);
+    dv.setUint32(0,inner);
+    let o=4;
+    const id=abrUUID(b.seed);
+    buf[o++]=36;
+    for(let i=0;i<36;i++)buf[o++]=id.charCodeAt(i);
+    o+=8;                       // unknown, zeros
+    dv.setUint16(o,8);o+=2;     // depth (bits)
+    dv.setInt32(o,0);o+=4;      // top
+    dv.setInt32(o,0);o+=4;      // left
+    dv.setInt32(o,b.h);o+=4;    // bottom
+    dv.setInt32(o,b.w);o+=4;    // right
+    dv.setUint16(o,8);o+=2;     // depth again
+    buf[o++]=0;                 // compression: raw
+    buf.set(b.data,o);
+    items.push(buf);
+    sampLen+=buf.length;
+  }
+  const head=new Uint8Array(16);
+  const hv=new DataView(head.buffer);
+  hv.setInt16(0,6);            // version 6
+  hv.setInt16(2,1);            // minor 1
+  head[4]=0x38;head[5]=0x42;head[6]=0x49;head[7]=0x4D; // 8BIM
+  head[8]=0x73;head[9]=0x61;head[10]=0x6D;head[11]=0x70; // samp
+  hv.setUint32(12,sampLen);
+  return new Blob([head,...items],{type:'application/octet-stream'});
+}
+async function doPackABR(){
+  const size=+$('size').value,count=+$('packCount').value;
+  busy.classList.add('show');
+  try{
+    const brushes=[];
+    for(let i=0;i<count;i++){
+      const sd=packSeed(state.seed,i);
+      busy.textContent=`Forging ${i+1} / ${count}…`;
+      const P=Object.assign(params(),{seed:sd});
+      const r=await render(state.preset,P,size);
+      const f=new Float32Array(r.data);
+      const data=new Uint8Array(f.length);
+      for(let j=0;j<f.length;j++)data[j]=Math.round((f[j]<0?0:f[j]>1?1:f[j])*255);
+      brushes.push({w:size,h:size,seed:sd,data});
+    }
+    busy.textContent='Writing ABR…';
+    const name=`alphasmith_${state.preset}_pack${count}${state.tile?'_tile':''}_${size}px.abr`;
+    downloadBlob(makeABR(brushes),name);
+    downloads++;
+    if(downloads===2)toast(`Enjoying AlphaSmith? <a href="${CONFIG.patreonUrl}" target="_blank" rel="noopener" style="font-weight:700">Support the forge on Patreon ❤</a>`,6000);
+    else toast(`Downloaded ${name} — in Photoshop: Brushes panel menu → Import Brushes`);
+  }catch(err){
+    console.error(err);toast('ABR export failed: '+err.message,6000);
+  }finally{busy.classList.remove('show');}
+}
+$('packAbr').onclick=()=>doPackABR();
+
 function encodePNG8(f,w,h){
   return new Promise((res,rej)=>{
     const c=document.createElement('canvas');c.width=w;c.height=h;
@@ -1102,7 +1239,54 @@ async function encodePNG16(f,w,h){
   return blob;
 }
 
+// ---------- community gallery ----------
+function applyGallery(g){
+  state.preset=g.p;
+  state.seed=g.s|0; state.scale=+g.sc||6; state.detail=+g.d||5;
+  state.pa=+g.a||50; state.pb=+g.b||50;
+  state.contrast=+g.c||0; state.brightness=+g.br||0; state.falloff=+g.f||0;
+  state.invert=g.i==1; state.tile=g.t==1;
+  $('seed').value=state.seed;$('scale').value=state.scale;$('detail').value=state.detail;
+  $('pa').value=state.pa;$('pb').value=state.pb;$('contrast').value=state.contrast;
+  $('brightness').value=state.brightness;$('falloff').value=state.falloff;
+  $('invert').checked=state.invert;$('tileable').checked=state.tile;
+  document.querySelectorAll('#presetList .preset').forEach(el=>el.classList.toggle('active',el.dataset.id===state.preset));
+  syncLabels();requestPreview();
+  window.scrollTo({top:0,behavior:'smooth'});
+  toast('Loaded \u201c'+g.name+'\u201d');
+}
+(async function gallery(){
+  let list;
+  try{
+    const res=await fetch('presets.json',{cache:'no-cache'});
+    if(!res.ok)throw new Error('http '+res.status);
+    list=(await res.json()).presets;
+    if(!Array.isArray(list)||!list.length)throw new Error('empty');
+  }catch(e){document.getElementById('community').style.display='none';return;}
+  const grid=$('galleryGrid');
+  for(const g of list){
+    if(!PRESET_META.some(m=>m.id===g.p))continue;
+    const b=document.createElement('button');
+    b.className='preset';
+    const c=document.createElement('canvas');c.width=96;c.height=96;
+    const s=document.createElement('span');s.textContent=g.name;
+    const s2=document.createElement('span');s2.textContent='by '+(g.author||'anon');s2.style.opacity=0.6;
+    b.append(c,s,s2);
+    b.onclick=()=>applyGallery(g);
+    grid.appendChild(b);
+    const P={seed:g.s|0,scale:+g.sc||6,detail:+g.d||5,pA:(+g.a||50)/100,pB:(+g.b||50)/100,
+             contrast:(+g.c||0)/100,brightness:(+g.br||0)/100,falloff:(+g.f||0)/100,invert:g.i==1,tile:g.t==1};
+    const r=await render(g.p,P,96);
+    const f=new Float32Array(r.data);
+    const cx=c.getContext('2d');
+    const img=cx.createImageData(96,96);
+    for(let i=0,j=0;i<f.length;i++,j+=4){const v=Math.round(f[i]*255);img.data[j]=v;img.data[j+1]=v;img.data[j+2]=v;img.data[j+3]=255;}
+    cx.putImageData(img,0,0);
+  }
+})();
+
 // ---------- boot ----------
+applyHash();
 syncLabels();
 requestPreview();
 </script>

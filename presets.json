@@ -1,0 +1,13 @@
+{
+  "presets": [
+    {"name":"Old Stone Wall","author":"AlphaSmith","p":"cobble","s":4211,"sc":8,"d":6,"a":55,"b":45,"t":1},
+    {"name":"Dry Lakebed","author":"AlphaSmith","p":"cracks","s":88123,"sc":9,"d":5,"a":42,"b":60,"t":1},
+    {"name":"Alien Skin","author":"AlphaSmith","p":"veins","s":707,"sc":11,"d":5,"a":70,"b":65,"t":1},
+    {"name":"Meteor Field","author":"AlphaSmith","p":"craters","s":3145,"sc":6,"d":5,"a":65,"b":75,"t":1},
+    {"name":"Ancient Oak","author":"AlphaSmith","p":"bark","s":2024,"sc":9,"d":5,"a":70,"b":60,"t":1},
+    {"name":"Battle Scars","author":"AlphaSmith","p":"damage","s":555,"sc":6,"d":5,"a":25,"b":70,"t":0},
+    {"name":"Dragonhide","author":"AlphaSmith","p":"chainmail","s":9021,"sc":9,"d":5,"a":75,"b":70,"t":1},
+    {"name":"Storm Marble","author":"AlphaSmith","p":"marble","s":311,"sc":7,"d":6,"a":80,"b":55,"t":1},
+    {"name":"Moon Dust","author":"AlphaSmith","p":"grunge","s":60146,"sc":10,"d":6,"a":70,"b":40,"t":1}
+  ]
+}

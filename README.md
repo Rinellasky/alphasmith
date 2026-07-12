@@ -9,6 +9,9 @@ Forge grayscale alpha masks / height stamps entirely in your browser — no sign
 - 13 procedural presets: Clouds, Ridged Rock, Cobblestone, Cracks, Veins, Marble Swirl, Grunge, Scratches, Stipple Dots, Craters, Tree Bark, Chainmail, Damage Decal
 - **Tileable / seamless mode** — periodic noise + toroidal stamping so brushes repeat with zero seams (2×2 tile preview built in)
 - **Brush pack ZIP export** — one click bundles 4/8/12 seed variations of the current preset into a ZIP with a settings manifest
+- **Photoshop .abr export** — pack seed variations straight into a brush set Photoshop, Krita and GIMP can import
+- **Shareable brush links** — the Share button copies a URL that recreates your exact brush; open anyone's link to load theirs
+- **Community gallery** — curated brushes from the guild, loaded from presets.json; share yours in Discord to get featured
 - Seeded generation — the same seed + settings always reproduces the same brush
 - Live sculpt-relief preview (see the alpha as if stamped into clay)
 - Universal controls: scale, detail, contrast, brightness, edge falloff (for round brush tips), invert
@@ -46,11 +49,9 @@ Everything is in `index.html`:
 - **Engine** — lives in a `<script type="text/plain" id="engineSrc">` block and runs in a Web Worker (built from a Blob), so 4096×4096 renders never freeze the UI. Contains seeded simplex noise, fBm, ridged multifractal, Worley/cellular noise, and stamp-based generators (scratches, dots, craters), plus the post pipeline (normalize → contrast/brightness → radial falloff → invert).
 - **App** — preset gallery with live thumbnails, debounced preview rendering, relief shading, and the exporters. 8-bit goes through canvas `toBlob`; 16-bit is a hand-rolled PNG encoder (grayscale, bit depth 16) using `CompressionStream` with a stored-block zlib fallback.
 
-## Roadmap ideas
+## Roadmap
 
-- Photoshop `.abr` packaging
-- Shareable settings URLs
-- Community preset gallery
+The original roadmap is complete. Got an idea? Bring it to the guild Discord.
 
 ## License
 
