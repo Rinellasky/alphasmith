@@ -1087,10 +1087,11 @@ $('pack8').onclick=()=>doPack(8);
 $('pack16').onclick=()=>doPack(16);
 
 // ----- ABR (Photoshop brush) export -----
-// Writes the modern v6.2 format (samp + patt + desc sections) reverse-engineered
-// from brush files Photoshop itself ships/accepts. desc is a serialized
-// ActionDescriptor of brushPreset objects; samp holds PackBits-compressed 8-bit
-// tips in a 56-slot channel table, which also keeps GIMP/Krita compatibility.
+// v6.1 sampled-brush format + descriptor section: the combination verified to
+// import in current Photoshop (reverse-engineered from packs PS accepts).
+// Item: pascal uuid, short rect (4xu16), depth, long rect (4xi32), depth,
+// compression=1 (PackBits with per-row length table), data. The desc section
+// is a serialized ActionDescriptor registering each tip as a brush preset.
 function mulberryHex(a){
   return function(n){
     let s='';
@@ -1149,23 +1150,15 @@ class ByteWriter{
   key(k){if(k.length===4){this.u32(0);this.ascii(k);}else{this.u32(k.length);this.ascii(k);}}
   bytes(){const out=new Uint8Array(this.len);let o=0;for(const p of this.parts){out.set(p,o);o+=p.length;}return out;}
 }
-function abrSampItem(uuid,w,h,data){
+function abrItem61(uuid,w,h,data){
   const comp=rleChannel(data,w,h);
-  const arrLen=4+16+2+1+comp.length;
   const bw=new ByteWriter();
   bw.u8(36);bw.ascii(uuid);
-  bw.i16(1);bw.i16(0);
-  bw.u32(3);
-  bw.u32(16+4+220+8+arrLen+8);      // VMAL length: rect..trailing masks
-  bw.i32(0);bw.i32(0);bw.i32(h);bw.i32(w);
-  bw.u32(56);                        // channel slot count (as Photoshop writes)
-  bw.push(new Uint8Array(220));      // 55 unwritten slots
-  bw.u32(1);bw.u32(arrLen);          // written flag + array length
-  bw.u32(8);                         // pixel depth
-  bw.i32(0);bw.i32(0);bw.i32(h);bw.i32(w);
-  bw.u16(8);bw.u8(1);                // depth, compression=PackBits
+  bw.u16(0);bw.u16(0);bw.u16(h);bw.u16(w);  // short rect
+  bw.u16(8);                                 // depth
+  bw.i32(0);bw.i32(0);bw.i32(h);bw.i32(w);   // long rect
+  bw.u16(8);bw.u8(1);                        // depth, compression=PackBits
   bw.push(comp);
-  bw.push(new Uint8Array(8));        // user mask + sheet mask: unwritten
   const body=bw.bytes();
   const out=new ByteWriter();
   out.u32(body.length);out.push(body);
@@ -1174,7 +1167,7 @@ function abrSampItem(uuid,w,h,data){
   return out.bytes();
 }
 function descWrite(bw,d){
-  bw.ustr(d._name||'');bw.key(d._class);
+  bw.ustr('');bw.key(d._class);
   const keys=Object.keys(d).filter(k=>k[0]!=='_');
   bw.u32(keys.length);
   for(const k of keys){bw.key(k);descItem(bw,d[k]);}
@@ -1194,29 +1187,32 @@ function descItem(bw,v){
   throw new Error('desc type');
 }
 function abrBrushPreset(name,uuid,size){
-  return {_name:'',_class:'brushPreset','Nm  ':name,
-    Brsh:{_name:'',_class:'sampledBrush',
+  return {_class:'brushPreset','Nm  ':name,
+    Brsh:{_class:'sampledBrush',
       Dmtr:['#Pxl',size],Angl:['#Ang',0],Rndn:['#Prc',100],'Nm  ':name,
       Spcn:['#Prc',25],Intr:true,flipX:false,flipY:false,sampledData:uuid},
     useTipDynamics:false,useScatter:false,
-    dualBrush:{_name:'',_class:'dualBrush',useDualBrush:false},
-    brushGroup:{_name:'',_class:'brushGroup',useBrushGroup:false},
+    dualBrush:{_class:'dualBrush',useDualBrush:false},
+    brushGroup:{_class:'brushGroup',useBrushGroup:false},
     useTexture:false,usePaintDynamics:false,useColorDynamics:false,
     Wtdg:false,Nose:false,'Rpt ':false,useBrushSize:false,useBrushPose:false};
 }
+function abrSection(bw,name,payload){
+  bw.ascii('8BIM');bw.ascii(name);bw.u32(payload.length);bw.push(payload);
+  const pad=(4-(payload.length%4))&3;
+  if(pad)bw.push(new Uint8Array(pad));
+}
 function makeABR(brushes){
   const bw=new ByteWriter();
-  bw.i16(6);bw.i16(2);
+  bw.i16(6);bw.i16(1);
   const samp=new ByteWriter();
-  for(const b of brushes)samp.push(abrSampItem(b.uuid,b.w,b.h,b.data));
-  const sampBytes=samp.bytes();
-  bw.ascii('8BIMsamp');bw.u32(sampBytes.length);bw.push(sampBytes);
-  bw.ascii('8BIMpatt');bw.u32(0);
+  for(const b of brushes)samp.push(abrItem61(b.uuid,b.w,b.h,b.data));
+  abrSection(bw,'samp',samp.bytes());
+  abrSection(bw,'patt',new Uint8Array(0));
   const desc=new ByteWriter();
   desc.u32(16);
-  descWrite(desc,{_name:'',_class:'null',Brsh:brushes.map(b=>abrBrushPreset(b.name,b.uuid,b.w))});
-  const descBytes=desc.bytes();
-  bw.ascii('8BIMdesc');bw.u32(descBytes.length);bw.push(descBytes);
+  descWrite(desc,{_class:'null',Brsh:brushes.map(b=>abrBrushPreset(b.name,b.uuid,b.w))});
+  abrSection(bw,'desc',desc.bytes());
   return new Blob([bw.bytes()],{type:'application/octet-stream'});
 }
 async function doPackABR(){
